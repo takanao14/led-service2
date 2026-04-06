@@ -45,17 +45,19 @@ enum DisplayModeArg {
 
 /// Infer the MIME type from the file extension.
 ///
-/// Falls back to `image/png` for unknown extensions.
-fn detect_mime(path: &str) -> &'static str {
+/// Returns `None` for unknown extensions; callers should warn the user and fall back.
+fn detect_mime(path: &str) -> Option<&'static str> {
     let lower = path.to_lowercase();
     if lower.ends_with(".ppm") || lower.ends_with(".pnm") || lower.ends_with(".pgm") {
-        "image/x-portable-pixmap"
+        Some("image/x-portable-pixmap")
     } else if lower.ends_with(".gif") {
-        "image/gif"
+        Some("image/gif")
     } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
-        "image/jpeg"
+        Some("image/jpeg")
+    } else if lower.ends_with(".png") {
+        Some("image/png")
     } else {
-        "image/png"
+        None
     }
 }
 
@@ -66,9 +68,18 @@ async fn main() -> Result<()> {
     let image_data = std::fs::read(&args.file)
         .with_context(|| format!("failed to read file: {}", args.file))?;
 
-    let mime_type = args
-        .mime
-        .unwrap_or_else(|| detect_mime(&args.file).to_string());
+    let mime_type = args.mime.unwrap_or_else(|| {
+        match detect_mime(&args.file) {
+            Some(m) => m.to_string(),
+            None => {
+                eprintln!(
+                    "warning: unknown file extension for '{}', assuming image/png",
+                    args.file
+                );
+                "image/png".to_string()
+            }
+        }
+    });
 
     let display_mode = match args.display_mode {
         Some(DisplayModeArg::Static) => DisplayMode::Static as i32,
