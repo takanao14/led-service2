@@ -89,10 +89,11 @@ impl LedDisplay for EmulatorDisplay {
         }
 
         let win = self.window()?;
-        if win.is_open() && !win.is_key_down(Key::Escape) {
-            win.update_with_buffer(&buffer, win_w, win_h)
-                .map_err(|e| anyhow::anyhow!("minifb update: {e}"))?;
+        if !win.is_open() || win.is_key_down(Key::Escape) {
+            return Err(anyhow::anyhow!(super::WINDOW_CLOSED));
         }
+        win.update_with_buffer(&buffer, win_w, win_h)
+            .map_err(|e| anyhow::anyhow!("minifb update: {e}"))?;
         std::thread::sleep(super::FRAME_INTERVAL);
         Ok(())
     }

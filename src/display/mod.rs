@@ -136,7 +136,12 @@ pub fn show(
     fill_pixels(&mut pixels, &panel, x_offset, rows, cols);
 
     while Instant::now() < deadline {
-        display.render_frame(&pixels)?;
+        if let Err(e) = display.render_frame(&pixels) {
+            if e.to_string() == WINDOW_CLOSED {
+                return Ok(());
+            }
+            return Err(e);
+        }
 
         if mode == DisplayMode::ScrollHorizontal && last_scroll.elapsed() >= scroll_interval {
             x_offset = (x_offset + 1) % img_w;
@@ -182,7 +187,12 @@ pub fn show_animated(
         let frame_end = (Instant::now() + *delay).min(deadline);
 
         while Instant::now() < frame_end {
-            display.render_frame(pixels)?;
+            if let Err(e) = display.render_frame(pixels) {
+                if e.to_string() == WINDOW_CLOSED {
+                    return Ok(());
+                }
+                return Err(e);
+            }
             let remaining = frame_end.saturating_duration_since(Instant::now());
             // Sleep only if render_frame returns quickly (emulator).
             // On RPi, update_on_vsync already blocks for the frame duration.
@@ -218,6 +228,14 @@ fn fill_pixels(
         })
     }));
 }
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/// Error message returned by `render_frame` when the emulator window is closed.
+/// Callers can match on this to break out of display loops cleanly.
+pub(crate) const WINDOW_CLOSED: &str = "window closed";
 
 // ---------------------------------------------------------------------------
 // Backend selection
