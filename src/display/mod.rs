@@ -131,8 +131,9 @@ pub fn show(
     let mut x_offset = 0usize;
     let mut last_scroll = Instant::now();
 
-    // Pre-extract pixels to avoid per-frame allocation in the render loop.
-    let mut pixels = extract_pixels(&panel, x_offset, rows, cols);
+    // Pre-allocate pixel buffer once; reused across frames to avoid repeated heap allocation.
+    let mut pixels = Vec::with_capacity(rows * cols);
+    fill_pixels(&mut pixels, &panel, x_offset, rows, cols);
 
     while Instant::now() < deadline {
         display.render_frame(&pixels)?;
@@ -140,7 +141,7 @@ pub fn show(
         if mode == DisplayMode::ScrollHorizontal && last_scroll.elapsed() >= scroll_interval {
             x_offset = (x_offset + 1) % img_w;
             last_scroll = Instant::now();
-            pixels = extract_pixels(&panel, x_offset, rows, cols);
+            fill_pixels(&mut pixels, &panel, x_offset, rows, cols);
         }
     }
 
@@ -169,7 +170,8 @@ pub fn show_animated(
         .iter()
         .map(|f| {
             let panel = resize_to_height(&f.image, cols as u32, rows as u32);
-            let pixels = extract_pixels(&panel, 0, rows, cols);
+            let mut pixels = Vec::with_capacity(rows * cols);
+            fill_pixels(&mut pixels, &panel, 0, rows, cols);
             (pixels, f.delay)
         })
         .collect();
@@ -199,22 +201,22 @@ pub fn show_animated(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn extract_pixels(
+fn fill_pixels(
+    buf: &mut Vec<(u8, u8, u8)>,
     panel: &DynamicImage,
     x_offset: usize,
     rows: usize,
     cols: usize,
-) -> Vec<(u8, u8, u8)> {
+) {
     let img_w = panel.width() as usize;
-    (0..rows)
-        .flat_map(|y| {
-            (0..cols).map(move |x| {
-                let src_x = (x_offset + x) % img_w;
-                let p = panel.get_pixel(src_x as u32, y as u32);
-                (p[0], p[1], p[2])
-            })
+    buf.clear();
+    buf.extend((0..rows).flat_map(|y| {
+        (0..cols).map(move |x| {
+            let src_x = (x_offset + x) % img_w;
+            let p = panel.get_pixel(src_x as u32, y as u32);
+            (p[0], p[1], p[2])
         })
-        .collect()
+    }));
 }
 
 // ---------------------------------------------------------------------------
