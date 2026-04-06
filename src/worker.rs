@@ -50,11 +50,12 @@ pub fn run_loop(
             "processing display request"
         );
 
-        // Show eye-catch GIF and play jingle simultaneously.
+        // Play jingle regardless of whether an eye-catch is configured.
+        if let Some(ref path) = jingle_path {
+            play_jingle(path);
+        }
+        // Show eye-catch GIF if configured (jingle plays concurrently above).
         if let Some(ref frames) = eyecatch_frames {
-            if let Some(ref path) = jingle_path {
-                play_jingle(path);
-            }
             let eyecatch_deadline = Instant::now() + eyecatch_duration;
             if let Err(e) = crate::display::show_animated(&mut *display, frames, eyecatch_deadline) {
                 tracing::warn!(error = %e, "eye-catch display error");
@@ -147,7 +148,7 @@ fn decode_gif(data: &[u8]) -> anyhow::Result<Vec<AnimFrame>> {
             let delay_ms = if den == 0 || num == 0 {
                 100
             } else {
-                (num / den).max(10)
+                ((num + den - 1) / den).max(10)
             };
             Ok(AnimFrame {
                 image: image::DynamicImage::ImageRgba8(f.into_buffer()),
