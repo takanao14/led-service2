@@ -1,10 +1,11 @@
+use std::net::SocketAddr;
 use std::time::Duration;
 
 /// Runtime configuration loaded from environment variables.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// gRPC listen address (env: `GRPC_ADDR`, default: `0.0.0.0:50051`)
-    pub grpc_addr: String,
+    pub grpc_addr: SocketAddr,
     /// Maximum time allowed per display request (env: `WORKER_TIMEOUT`, default: `30s`)
     pub worker_timeout: Duration,
     /// Number of LED panel rows (env: `PANEL_ROWS`, default: `32`)
@@ -33,8 +34,10 @@ impl Config {
     /// # Errors
     /// Returns an error if `WORKER_TIMEOUT` is set but cannot be parsed as a duration.
     pub fn from_env() -> anyhow::Result<Self> {
-        let grpc_addr = std::env::var("GRPC_ADDR")
-            .unwrap_or_else(|_| "0.0.0.0:50051".to_string());
+        let grpc_addr: SocketAddr = std::env::var("GRPC_ADDR")
+            .unwrap_or_else(|_| "0.0.0.0:50051".to_string())
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid GRPC_ADDR: {e}"))?;
 
         let worker_timeout = match std::env::var("WORKER_TIMEOUT") {
             Ok(v) => humantime::parse_duration(&v)

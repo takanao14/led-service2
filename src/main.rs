@@ -52,7 +52,7 @@ fn main() -> anyhow::Result<()> {
             .build()
             .expect("failed to build tokio runtime")
             .block_on(async move {
-                let addr = cfg_grpc.grpc_addr.parse().expect("invalid grpc_addr");
+                let addr = cfg_grpc.grpc_addr;
                 let svc = LedImageService::new(tx);
 
                 tracing::info!(%addr, "gRPC server listening");
