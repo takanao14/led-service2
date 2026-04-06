@@ -45,41 +45,66 @@ impl Config {
             Err(_) => Duration::from_secs(30),
         };
 
-        let panel_rows = std::env::var("PANEL_ROWS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(32);
+        let panel_rows = match std::env::var("PANEL_ROWS") {
+            Ok(v) => v.parse::<u32>().unwrap_or_else(|e| {
+                tracing::warn!(value = %v, error = %e, "invalid PANEL_ROWS, using default 32");
+                32
+            }),
+            Err(_) => 32,
+        };
 
-        let panel_cols = std::env::var("PANEL_COLS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(64);
+        let panel_cols = match std::env::var("PANEL_COLS") {
+            Ok(v) => v.parse::<u32>().unwrap_or_else(|e| {
+                tracing::warn!(value = %v, error = %e, "invalid PANEL_COLS, using default 64");
+                64
+            }),
+            Err(_) => 64,
+        };
 
-        let panel_brightness = std::env::var("PANEL_BRIGHTNESS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(50);
+        let panel_brightness = match std::env::var("PANEL_BRIGHTNESS") {
+            Ok(v) => v.parse::<u8>().unwrap_or_else(|e| {
+                tracing::warn!(value = %v, error = %e, "invalid PANEL_BRIGHTNESS, using default 50");
+                50
+            }),
+            Err(_) => 50,
+        };
 
-        let scroll_interval_ms: u64 = std::env::var("SCROLL_INTERVAL_MS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(30);
+        let scroll_interval_ms: u64 = match std::env::var("SCROLL_INTERVAL_MS") {
+            Ok(v) => v.parse::<u64>().unwrap_or_else(|e| {
+                tracing::warn!(value = %v, error = %e, "invalid SCROLL_INTERVAL_MS, using default 30");
+                30
+            }),
+            Err(_) => 30,
+        };
 
-        let panel_refresh_rate: usize = std::env::var("PANEL_REFRESH_RATE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(120);
+        let panel_refresh_rate: usize = match std::env::var("PANEL_REFRESH_RATE") {
+            Ok(v) => v.parse::<usize>().unwrap_or_else(|e| {
+                tracing::warn!(value = %v, error = %e, "invalid PANEL_REFRESH_RATE, using default 120");
+                120
+            }),
+            Err(_) => 120,
+        };
 
-        let panel_slowdown: Option<u32> = std::env::var("PANEL_SLOWDOWN")
-            .ok()
-            .and_then(|v| v.parse().ok());
+        let panel_slowdown: Option<u32> = match std::env::var("PANEL_SLOWDOWN") {
+            Ok(v) => match v.parse::<u32>() {
+                Ok(n) => Some(n),
+                Err(e) => {
+                    tracing::warn!(value = %v, error = %e, "invalid PANEL_SLOWDOWN, ignoring");
+                    None
+                }
+            },
+            Err(_) => None,
+        };
 
         let jingle_path = std::env::var("JINGLE_PATH").ok();
         let eyecatch_path = std::env::var("EYECATCH_PATH").ok();
-        let eyecatch_duration_ms: u64 = std::env::var("EYECATCH_DURATION_MS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(3000);
+        let eyecatch_duration_ms: u64 = match std::env::var("EYECATCH_DURATION_MS") {
+            Ok(v) => v.parse::<u64>().unwrap_or_else(|e| {
+                tracing::warn!(value = %v, error = %e, "invalid EYECATCH_DURATION_MS, using default 5000");
+                5000
+            }),
+            Err(_) => 5000,
+        };
 
         Ok(Self {
             grpc_addr,
