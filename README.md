@@ -31,7 +31,7 @@ led-server
 | Environment | Requirements |
 |-------------|-------------|
 | macOS (development) | Rust toolchain |
-| Raspberry Pi (production) | Rust toolchain, root privileges (LED panel control) |
+| Raspberry Pi (production) | Rust toolchain, root privileges (LED panel control), `libasound2-dev` (ALSA audio) |
 
 ## Build
 
@@ -164,16 +164,18 @@ The request queue capacity is 10. When full, `RESOURCE_EXHAUSTED` is returned.
 
 ## Key Dependencies
 
-| Crate | Purpose | License |
-|-------|---------|---------|
-| [rpi-led-matrix](https://crates.io/crates/rpi-led-matrix) | RPi LED matrix panel control | GPL-3.0 |
-| [tonic](https://crates.io/crates/tonic) | gRPC server and client | MIT |
-| [prost](https://crates.io/crates/prost) | Protocol Buffers code generation | Apache-2.0 |
-| [tokio](https://crates.io/crates/tokio) | Async runtime | MIT |
-| [image](https://crates.io/crates/image) | Image decoding (PNG / JPEG / GIF / PPM) | Apache-2.0 OR MIT |
-| [rodio](https://crates.io/crates/rodio) | WAV audio playback | Apache-2.0 OR MIT |
-| [minifb](https://crates.io/crates/minifb) | Window rendering for emulator | Apache-2.0 OR MIT |
-| [clap](https://crates.io/crates/clap) | CLI argument parsing | Apache-2.0 OR MIT |
+| Crate | Purpose | Platform | License |
+|-------|---------|----------|---------|
+| [rpi-led-matrix](https://crates.io/crates/rpi-led-matrix) | RPi LED matrix panel control | RPi | GPL-3.0 |
+| [tonic](https://crates.io/crates/tonic) | gRPC server and client | all | MIT |
+| [prost](https://crates.io/crates/prost) | Protocol Buffers code generation | all | Apache-2.0 |
+| [tokio](https://crates.io/crates/tokio) | Async runtime | all | MIT |
+| [image](https://crates.io/crates/image) | Image decoding (PNG / JPEG / GIF / PPM) | all | Apache-2.0 OR MIT |
+| [alsa](https://crates.io/crates/alsa) | WAV audio playback via direct ALSA access | Linux | MIT OR Apache-2.0 |
+| [hound](https://crates.io/crates/hound) | WAV file decoding | Linux | Apache-2.0 |
+| [rodio](https://crates.io/crates/rodio) | WAV audio playback | non-Linux | Apache-2.0 OR MIT |
+| [minifb](https://crates.io/crates/minifb) | Window rendering for emulator | non-Linux | Apache-2.0 OR MIT |
+| [clap](https://crates.io/crates/clap) | CLI argument parsing | all | Apache-2.0 OR MIT |
 
 ## License
 
