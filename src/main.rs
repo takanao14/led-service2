@@ -3,10 +3,9 @@ mod display;
 mod service;
 mod worker;
 
-/// Protocol Buffers generated code for `image.v1`.
-pub mod proto {
-    tonic::include_proto!("image.v1");
-}
+// Re-export the proto module from the library crate so that submodules can
+// continue to use `crate::proto::...` without any changes.
+pub use led_service2::proto;
 
 use proto::image_service_server::ImageServiceServer;
 use service::LedImageService;
@@ -46,7 +45,7 @@ fn main() -> anyhow::Result<()> {
     // gRPC server runs in a background thread so the main thread stays free
     // for the display loop.
     let cfg_grpc = cfg.clone();
-    std::thread::spawn(move || {
+    let grpc_handle = std::thread::spawn(move || {
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -78,6 +77,10 @@ fn main() -> anyhow::Result<()> {
         cfg.eyecatch_path,
         cfg.eyecatch_duration,
     );
+
+    if let Err(e) = grpc_handle.join() {
+        tracing::error!("gRPC server thread panicked: {:?}", e);
+    }
 
     Ok(())
 }

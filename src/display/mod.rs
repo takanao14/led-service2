@@ -83,7 +83,14 @@ pub trait LedDisplay {
     /// Render one frame of pixels.
     ///
     /// `pixels` is a row-major slice of `(r, g, b)` values with `rows * cols` entries.
-    /// Must return quickly — timing is managed by the caller.
+    ///
+    /// **Blocking contract**: implementations are expected to block for approximately
+    /// one frame duration before returning (e.g. the emulator sleeps for
+    /// [`FRAME_INTERVAL`], the RPi backend blocks on vsync). The display loops in
+    /// [`show`] and [`show_animated`] rely on this behaviour to cap CPU usage.
+    ///
+    /// Returns [`WindowClosedError`] (wrapped in `anyhow::Error`) when the
+    /// emulator window has been closed; callers should exit gracefully on this error.
     fn render_frame(&mut self, pixels: &[(u8, u8, u8)]) -> Result<()>;
 
     /// Clear the panel to all black.
@@ -137,7 +144,7 @@ pub fn show(
 
     while Instant::now() < deadline {
         if let Err(e) = display.render_frame(&pixels) {
-            if e.to_string() == WINDOW_CLOSED {
+            if e.is::<WindowClosedError>() {
                 return Ok(());
             }
             return Err(e);
@@ -171,7 +178,8 @@ pub fn show_animated(
     let cols = display.cols();
 
     // Pre-resize all frames once to avoid repeated allocation in the loop.
-    let panels: Vec<(Vec<(u8, u8, u8)>, Duration)> = frames
+    type PixelBuf = Vec<(u8, u8, u8)>;
+    let panels: Vec<(PixelBuf, Duration)> = frames
         .iter()
         .map(|f| {
             let panel = resize_to_height(&f.image, cols as u32, rows as u32);
@@ -188,7 +196,7 @@ pub fn show_animated(
 
         while Instant::now() < frame_end {
             if let Err(e) = display.render_frame(pixels) {
-                if e.to_string() == WINDOW_CLOSED {
+                if e.is::<WindowClosedError>() {
                     return Ok(());
                 }
                 return Err(e);
@@ -230,12 +238,17 @@ fn fill_pixels(
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers
+// Error sentinels
 // ---------------------------------------------------------------------------
 
-/// Error message returned by `render_frame` when the emulator window is closed.
-/// Callers can match on this to break out of display loops cleanly.
-pub(crate) const WINDOW_CLOSED: &str = "window closed";
+/// Sentinel error returned by [`LedDisplay::render_frame`] when the display
+/// window has been closed by the user.
+///
+/// Callers detect this via [`anyhow::Error::is::<WindowClosedError>()`] and
+/// exit display loops cleanly without propagating the error.
+#[derive(Debug, thiserror::Error)]
+#[error("window closed")]
+pub struct WindowClosedError;
 
 // ---------------------------------------------------------------------------
 // Backend selection

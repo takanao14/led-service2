@@ -90,7 +90,7 @@ impl LedDisplay for EmulatorDisplay {
 
         let win = self.window()?;
         if !win.is_open() || win.is_key_down(Key::Escape) {
-            return Err(anyhow::anyhow!(super::WINDOW_CLOSED));
+            return Err(anyhow::Error::from(super::WindowClosedError));
         }
         win.update_with_buffer(&buffer, win_w, win_h)
             .map_err(|e| anyhow::anyhow!("minifb update: {e}"))?;

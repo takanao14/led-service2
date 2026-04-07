@@ -1,11 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
+use std::time::Duration;
 
-/// Protocol Buffers generated code for `image.v1`.
-pub mod proto {
-    tonic::include_proto!("image.v1");
-}
-
+use led_service2::proto;
 use proto::image_service_client::ImageServiceClient;
 use proto::{DisplayMode, ImageData, SendImageRequest};
 
@@ -25,8 +22,8 @@ struct Args {
     #[arg(long)]
     mime: Option<String>,
 
-    /// Display duration in seconds
-    #[arg(long, default_value_t = 10)]
+    /// Display duration in seconds (must be ≥ 1)
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(i32).range(1..))]
     duration: i32,
 
     /// Display mode (default: inferred from file type — PPM scrolls, others are static)
@@ -87,7 +84,14 @@ async fn main() -> Result<()> {
         None => DisplayMode::Unspecified as i32,
     };
 
-    let mut client = ImageServiceClient::connect(args.addr.clone())
+    // Allow a bit more than the display duration for the request to complete.
+    let request_timeout = Duration::from_secs(args.duration as u64 + 10);
+    let endpoint = tonic::transport::Endpoint::from_shared(args.addr.clone())
+        .with_context(|| format!("invalid address: {}", args.addr))?
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(request_timeout);
+
+    let mut client = ImageServiceClient::connect(endpoint)
         .await
         .with_context(|| format!("failed to connect to {}", args.addr))?;
 

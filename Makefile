@@ -11,7 +11,10 @@
 SERVICE_NAME  := led-server
 SERVICE_FILE  := /etc/systemd/system/$(SERVICE_NAME).service
 BINARY        := $(shell pwd)/target/release/$(SERVICE_NAME)
-ASSETS        := $(shell pwd)/assets
+
+# Path for installed assets
+INSTALL_BASE  := /opt/led-service2
+ASSETS_DEST   := $(INSTALL_BASE)/assets
 
 # Panel configuration
 PANEL_ROWS           ?= 32
@@ -21,9 +24,9 @@ PANEL_REFRESH_RATE   ?= 60
 PANEL_SLOWDOWN       ?= 2
 
 # Optional features (leave empty to disable)
-EYECATCH_PATH        ?= $(ASSETS)/butacowalk2.gif
+EYECATCH_PATH        ?= $(ASSETS_DEST)/butacowalk2.gif
 EYECATCH_DURATION_MS ?= 5000
-JINGLE_PATH          ?= $(ASSETS)/splanews.wav
+JINGLE_PATH          ?= $(ASSETS_DEST)/splanews.wav
 
 # gRPC
 GRPC_ADDR ?= 0.0.0.0:50051
@@ -62,6 +65,14 @@ assert-macos:
 	@[ "$(OS)" = "Darwin" ] || { echo "Error: '$(MAKECMDGOALS)' is only supported on macOS."; exit 1; }
 
 install: assert-rpi
+	@echo "Installing assets to $(ASSETS_DEST) ..."
+	mkdir -p $(ASSETS_DEST)
+	cp -r assets/* $(ASSETS_DEST)/
+	chmod -R 755 $(ASSETS_DEST)
+	@echo "Installing udev rule for sound device access ..."
+	@echo 'SUBSYSTEM=="sound", MODE="0666"' > /etc/udev/rules.d/99-led-server-audio.rules
+	udevadm control --reload-rules
+	udevadm trigger --subsystem-match=sound
 	@echo "Creating $(SERVICE_FILE) ..."
 	@{ \
 		echo '[Unit]'; \
@@ -77,6 +88,8 @@ install: assert-rpi
 		echo 'RestartSec=5'; \
 		echo ''; \
 		echo "Environment=LOG_FORMAT=json"; \
+		echo "Environment=RUST_LOG=$(RUST_LOG)"; \
+		echo "Environment=HOME=/root"; \
 		echo "Environment=GRPC_ADDR=$(GRPC_ADDR)"; \
 		echo "Environment=PANEL_ROWS=$(PANEL_ROWS)"; \
 		echo "Environment=PANEL_COLS=$(PANEL_COLS)"; \

@@ -144,11 +144,18 @@ fn decode_gif(data: &[u8]) -> anyhow::Result<Vec<AnimFrame>> {
     frames
         .into_iter()
         .map(|f| {
+            // `numer_denom_ms()` returns (u32, u32); cast to u64 to avoid overflow.
             let (num, den) = f.delay().numer_denom_ms();
             let delay_ms = if den == 0 || num == 0 {
-                100
+                100u32
             } else {
-                ((num + den - 1) / den).max(10)
+                // Use u64 to avoid overflow, then clamp. `div_ceil` avoids the
+                // manual `(num + den - 1) / den` idiom flagged by clippy.
+                let ms = (num as u64).div_ceil(den as u64);
+                if ms > 60_000 {
+                    tracing::warn!(delay_ms = ms, "GIF frame delay unusually large, clamping to 60 s");
+                }
+                (ms.min(60_000u64) as u32).max(10)
             };
             Ok(AnimFrame {
                 image: image::DynamicImage::ImageRgba8(f.into_buffer()),
@@ -161,19 +168,68 @@ fn decode_gif(data: &[u8]) -> anyhow::Result<Vec<AnimFrame>> {
 /// Play the WAV file at `path` in a background thread.
 ///
 /// The audio runs concurrently with image display. Errors are logged but do not
-/// affect display. The background thread owns the `OutputStream` for the duration
-/// of playback; dropping it early would stop audio.
+/// affect display.
+///
+/// On Linux, uses `aplay` with a dynamically generated minimal ALSA config
+/// (written to a temp file and passed via `ALSA_CONFIG_PATH`) to bypass
+/// ALSA's `snd_config_get_card()` name resolution, which fails when the
+/// PipeWire ALSA plugin cannot connect to a user session (e.g. as a child of a
+/// systemd service). Using an integer `card N` in the generated config avoids
+/// the name resolution path entirely.
+/// On other platforms, uses rodio with the system default sink.
 fn play_jingle(path: &str) {
     let path = path.to_owned();
     std::thread::spawn(move || {
         let play = || -> anyhow::Result<()> {
-            let mut sink = rodio::DeviceSinkBuilder::open_default_sink()?;
-            sink.log_on_drop(false);
-            let player = rodio::Player::connect_new(sink.mixer());
-            let file = std::fs::File::open(&path)?;
-            player.append(rodio::Decoder::try_from(file)?);
-            player.sleep_until_end();
-            Ok(())
+            #[cfg(target_os = "linux")]
+            {
+                use std::io::Write as _;
+
+                let idx = usb_audio_card_index().ok_or_else(|| anyhow::anyhow!("USB audio card not found in /proc/asound/cards"))?;
+                tracing::debug!(idx, "playing jingle via aplay on USB card");
+
+                // Write a minimal ALSA config to a per-invocation temp file to avoid
+                // snd_config_get_card() name resolution failures (common when running
+                // as a systemd service) and to eliminate write-then-read races that
+                // would occur if a single shared file were used.
+                let alsa_conf = format!(
+                    "pcm.usbplay {{\n  type plug\n  slave.pcm {{\n    type hw\n    card {idx}\n    device 0\n  }}\n}}\nctl.usbplay {{\n  type hw\n  card {idx}\n}}\n"
+                );
+                let mut conf_file = tempfile::NamedTempFile::new()
+                    .map_err(|e| anyhow::anyhow!("failed to create temp ALSA config: {e}"))?;
+                conf_file.write_all(alsa_conf.as_bytes())
+                    .map_err(|e| anyhow::anyhow!("failed to write ALSA config: {e}"))?;
+                conf_file.flush()
+                    .map_err(|e| anyhow::anyhow!("failed to flush ALSA config: {e}"))?;
+
+                let output = std::process::Command::new("aplay")
+                    .env("ALSA_CONFIG_PATH", conf_file.path())
+                    .arg("-D").arg("usbplay")
+                    .arg(&path)
+                    .output()
+                    .map_err(|e| anyhow::anyhow!("failed to run aplay: {e}"))?;
+                // conf_file is dropped here — temp file is deleted after aplay exits.
+                drop(conf_file);
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    anyhow::bail!("aplay exited with {}: {}", output.status, stderr);
+                }
+                Ok(())
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                use rodio::Source;
+                let file = std::fs::File::open(&path)?;
+                let source = rodio::Decoder::try_from(std::io::BufReader::new(file))?.buffered();
+                let mut sink = rodio::DeviceSinkBuilder::open_default_sink()
+                    .map_err(|e| anyhow::anyhow!("failed to open audio sink: {e}"))?;
+                sink.log_on_drop(false);
+                let player = rodio::Player::connect_new(sink.mixer());
+                player.append(source);
+                player.sleep_until_end();
+                Ok(())
+            }
         };
         if let Err(e) = play() {
             tracing::warn!(error = %e, path = %path, "jingle playback failed");
@@ -181,8 +237,25 @@ fn play_jingle(path: &str) {
     });
 }
 
+/// Read `/proc/asound/cards` and return the numeric index of the first USB audio device.
+/// Format: " N [ShortName    ]: driver - Full Name"
+/// Using a numeric index avoids snd_config_get_card name-resolution, which fails in
+/// some environments (e.g. as a child process of a systemd service with cleared env).
+#[cfg(target_os = "linux")]
+fn usb_audio_card_index() -> Option<u32> {
+    let content = std::fs::read_to_string("/proc/asound/cards").ok()?;
+    for line in content.lines() {
+        if line.contains("USB") {
+            let trimmed = line.trim_start();
+            let idx_str = trimmed.split_whitespace().next()?;
+            return idx_str.parse().ok();
+        }
+    }
+    None
+}
+
 fn is_gif(mime_type: &str) -> bool {
-    mime_type.contains("gif")
+    mime_type.eq_ignore_ascii_case("image/gif")
 }
 
 fn is_ppm(mime_type: &str) -> bool {
