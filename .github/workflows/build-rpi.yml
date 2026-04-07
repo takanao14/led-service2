@@ -1,0 +1,33 @@
+name: Build RPi Binary
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev build-essential
+
+      - name: Build
+        run: cargo build --release --bin led-server --features rpi --no-default-features
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: led-server-aarch64-${{ github.sha }}
+          path: target/release/led-server
+          retention-days: 30
