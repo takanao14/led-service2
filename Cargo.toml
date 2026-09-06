@@ -17,8 +17,9 @@ rpi = ["dep:rpi-led-matrix"]
 emulator = ["dep:minifb"]
 
 [dependencies]
-tonic = { version = "0.12", features = ["transport"] }
-prost = "0.13"
+tonic = { version = "0.14", features = ["transport"] }
+tonic-prost = "0.14"
+prost = "0.14"
 tokio = { version = "1", features = ["full"] }
 image = { version = "0.25", default-features = false, features = ["png", "pnm", "gif", "jpeg"] }
 tracing = "0.1"
@@ -39,4 +40,4 @@ alsa = "0.11"
 hound = "3.5"
 
 [build-dependencies]
-tonic-build = "0.12"
+tonic-prost-build = "0.14"

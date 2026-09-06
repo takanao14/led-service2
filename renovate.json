@@ -24,9 +24,9 @@
   },
   "packageRules": [
     {
-      "description": "tonic, tonic-build and prost generate and consume the same bindings, so they must move together.",
+      "description": "tonic, tonic-prost, tonic-prost-build and prost generate and consume the same bindings, so they must move together.",
       "matchManagers": ["cargo"],
-      "matchPackageNames": ["tonic", "tonic-build", "prost"],
+      "matchPackageNames": ["tonic", "tonic-prost", "tonic-prost-build", "prost"],
       "groupName": "tonic and prost"
     },
     {
@@ -35,6 +35,12 @@
       "matchPackageNames": ["rpi-led-matrix", "minifb", "alsa", "rodio", "hound"],
       "automerge": false,
       "labels": ["dependencies", "renovate", "manual-review", "hardware-backend"]
+    },
+    {
+      "description": "alsa 0.12 requires alsa-sys 0.6, while rodio -> cpal still pulls in an older alsa-sys. Both declare links = \"alsa\", and cargo resolves the union of the target-specific dependencies, so only one may exist. Lift this once cpal and rodio ship alsa-sys 0.6.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["alsa"],
+      "allowedVersions": "<0.12"
     },
     {
       "description": "Never auto-merge major updates.",
