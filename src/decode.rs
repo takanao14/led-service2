@@ -199,4 +199,25 @@ mod tests {
         };
         assert!(image(&test_support::png(16, 16), &limits, &work).is_err());
     }
+
+    #[test]
+    fn expired_or_cancelled_work_does_not_start_decode() {
+        let shutdown = Shutdown::new();
+        let work = Work {
+            shutdown: &shutdown,
+            deadline: Instant::now(),
+        };
+        assert!(image(b"invalid", &ImageLimits::default(), &work)
+            .unwrap_err()
+            .is::<crate::shutdown::Stopped>());
+        shutdown.cancel();
+        let work = Work {
+            shutdown: &shutdown,
+            deadline: Instant::now() + Duration::from_secs(1),
+        };
+        assert!(gif(b"invalid", &ImageLimits::default(), &work)
+            .err()
+            .unwrap()
+            .is::<crate::shutdown::Stopped>());
+    }
 }

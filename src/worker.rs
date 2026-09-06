@@ -1,29 +1,19 @@
-use crate::config::{Config, ImageLimits};
-use crate::shutdown::{Shutdown, Work};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use crate::display::{AnimFrame, DisplayMode, LedDisplay};
+use crate::config::Config;
+use crate::display::{AnimFrame, DisplayMode, LedDisplay, WindowClosedError};
 use crate::proto::DisplayMode as ProtoDisplayMode;
+use crate::shutdown::{Shutdown, Stopped, Work};
 
-/// A request to display an image, as queued by the gRPC service.
 pub struct DisplayRequest {
-    /// Raw image bytes received from the client.
     pub image_data: Vec<u8>,
-    /// MIME type of the image (e.g. `image/png`, `image/gif`).
     pub mime_type: String,
-    /// How long to display the image.
     pub duration: Duration,
-    /// Display mode requested by the client.
     pub display_mode: ProtoDisplayMode,
 }
 
-/// Run the display loop on the calling thread.
-///
-/// Processes [`DisplayRequest`]s from `rx` sequentially until the channel is closed.
-/// Each request is subject to `worker_timeout`; if display takes longer, it is cut short.
-///
-/// **Must be called on the main thread on macOS** because minifb uses Cocoa.
+/// Sequential display processing on the main thread, including idle window events.
 pub fn run_loop(
     mut display: Box<dyn LedDisplay>,
     rx: Receiver<DisplayRequest>,
@@ -31,23 +21,12 @@ pub fn run_loop(
     shutdown: &Shutdown,
 ) -> anyhow::Result<()> {
     let _guard = shutdown.guard();
-    let startup_work = Work {
-        shutdown,
-        deadline: Instant::now() + cfg.worker_timeout,
-    };
-    let eyecatch_frames = cfg.eyecatch_path.as_deref().and_then(|path| {
-        match load_eyecatch(path, cfg, &startup_work) {
-            Ok(frames) => Some(frames),
-            Err(e) => {
-                tracing::warn!(error = %e, path, "failed to load eye-catch GIF");
-                None
-            }
-        }
-    });
-
+    // Load lazily: decoding the eye-catch counts against the first request's budget.
+    let mut eyecatch_frames = None;
+    let mut eyecatch_loaded = false;
     while !shutdown.is_cancelled() {
         if let Err(e) = display.poll_events() {
-            if e.is::<crate::display::WindowClosedError>() {
+            if e.is::<WindowClosedError>() {
                 break;
             }
             return Err(e);
@@ -57,56 +36,33 @@ pub fn run_loop(
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break,
         };
+        let work = Work {
+            shutdown,
+            deadline: Instant::now()
+                .checked_add(req.duration.min(cfg.worker_timeout))
+                .ok_or_else(|| anyhow::anyhow!("request duration is too large"))?,
+        };
         if shutdown.is_cancelled() {
             break;
         }
-        tracing::info!(
-            duration = ?req.duration,
-            mime_type = %req.mime_type,
-            "processing display request"
+        tracing::info!(duration = ?req.duration, mime_type = %req.mime_type, "processing display request");
+        let result = process_request(
+            &mut *display,
+            &req,
+            cfg,
+            &work,
+            &mut eyecatch_frames,
+            &mut eyecatch_loaded,
         );
-
-        // Play jingle regardless of whether an eye-catch is configured.
-        if let Some(ref path) = cfg.jingle_path {
-            play_jingle(path);
-        }
-        if let Some(ref frames) = eyecatch_frames {
-            let eye_work = Work {
-                shutdown,
-                deadline: Instant::now() + cfg.eyecatch_duration,
-            };
-            if let Err(e) =
-                crate::display::show_animated(&mut *display, frames, &cfg.image_limits, &eye_work)
-            {
-                if e.is::<crate::display::WindowClosedError>() {
-                    break;
-                }
-                tracing::warn!(error = %e, "eye-catch display error");
-            }
-            display.clear()?;
-        }
-        let work = Work {
-            shutdown,
-            deadline: Instant::now() + req.duration.min(cfg.worker_timeout),
-        };
-        let result = if is_gif(&req.mime_type) {
-            run_animated(&mut *display, &req.image_data, &cfg.image_limits, &work)
-        } else {
-            let mode = resolve_display_mode(req.display_mode, &req.mime_type);
-            run_static(
-                &mut *display,
-                &req.image_data,
-                mode,
-                cfg.scroll_interval,
-                &cfg.image_limits,
-                &work,
-            )
-        };
+        // Clear on success, timeout, decode failure, and shutdown. Never reopen a closed window.
         display.clear()?;
-
         match result {
             Ok(()) => tracing::info!("display done"),
-            Err(e) if e.is::<crate::display::WindowClosedError>() => break,
+            Err(e) if e.is::<WindowClosedError>() => break,
+            Err(_) if shutdown.is_cancelled() => break,
+            Err(e) if e.is::<Stopped>() || Instant::now() >= work.deadline => {
+                tracing::info!("request deadline exceeded");
+            }
             Err(e) => tracing::error!(error = %e, "display error"),
         }
     }
@@ -115,43 +71,63 @@ pub fn run_loop(
     Ok(())
 }
 
-fn run_static(
+fn process_request(
     display: &mut dyn LedDisplay,
-    data: &[u8],
-    mode: DisplayMode,
-    scroll_interval: Duration,
-    limits: &ImageLimits,
+    req: &DisplayRequest,
+    cfg: &Config,
     work: &Work<'_>,
+    eyecatch_frames: &mut Option<Vec<AnimFrame>>,
+    eyecatch_loaded: &mut bool,
 ) -> anyhow::Result<()> {
-    let img = crate::decode::image(data, limits, work)?;
-    crate::display::show(display, &img, mode, scroll_interval, limits, work)
-}
-
-fn run_animated(
-    display: &mut dyn LedDisplay,
-    data: &[u8],
-    limits: &ImageLimits,
-    work: &Work<'_>,
-) -> anyhow::Result<()> {
-    let frames = crate::decode::gif(data, limits, work)?;
-    crate::display::show_animated(display, &frames, limits, work)
-}
-
-/// Resolve the effective [`DisplayMode`] from the proto request field and mime_type fallback.
-///
-/// When `proto_mode` is `Unspecified`, the mode is inferred from `mime_type`:
-/// PPM/PNM files default to [`DisplayMode::ScrollHorizontal`], all others to [`DisplayMode::Static`].
-fn resolve_display_mode(proto_mode: ProtoDisplayMode, mime_type: &str) -> DisplayMode {
-    match proto_mode {
-        ProtoDisplayMode::Static => DisplayMode::Static,
-        ProtoDisplayMode::Scroll => DisplayMode::ScrollHorizontal,
-        ProtoDisplayMode::Unspecified => {
-            if is_ppm(mime_type) {
-                DisplayMode::ScrollHorizontal
-            } else {
-                DisplayMode::Static
+    work.check()?;
+    if !*eyecatch_loaded {
+        if let Some(path) = cfg.eyecatch_path.as_deref().filter(|p| !p.is_empty()) {
+            let result = load_eyecatch(path, cfg, work);
+            work.check()?;
+            match result {
+                Ok(frames) => *eyecatch_frames = Some(frames),
+                Err(e) => tracing::warn!(error = %e, path, "failed to load eye-catch GIF"),
             }
         }
+        *eyecatch_loaded = true;
+    }
+    work.check()?;
+    if let Some(path) = cfg.jingle_path.as_deref().filter(|p| !p.is_empty()) {
+        play_jingle(path);
+    }
+    if let Some(frames) = eyecatch_frames {
+        let eye_work = Work {
+            shutdown: work.shutdown,
+            deadline: Instant::now()
+                .checked_add(cfg.eyecatch_duration)
+                .unwrap_or(work.deadline)
+                .min(work.deadline),
+        };
+        if cfg.eyecatch_duration > Duration::ZERO {
+            match crate::display::show_animated(display, frames, &cfg.image_limits, &eye_work) {
+                Err(e) if e.is::<WindowClosedError>() => return Err(e),
+                Err(e) if !e.is::<Stopped>() => {
+                    tracing::warn!(error = %e, "eye-catch display error");
+                }
+                _ => {}
+            }
+            display.clear()?;
+        }
+    }
+    work.check()?;
+    if is_gif(&req.mime_type) {
+        let frames = crate::decode::gif(&req.image_data, &cfg.image_limits, work)?;
+        crate::display::show_animated(display, &frames, &cfg.image_limits, work)
+    } else {
+        let image = crate::decode::image(&req.image_data, &cfg.image_limits, work)?;
+        crate::display::show(
+            display,
+            &image,
+            resolve_display_mode(req.display_mode, &req.mime_type),
+            cfg.scroll_interval,
+            &cfg.image_limits,
+            work,
+        )
     }
 }
 
@@ -183,6 +159,20 @@ fn load_eyecatch(path: &str, cfg: &Config, work: &Work<'_>) -> anyhow::Result<Ve
         data.extend_from_slice(&chunk[..count]);
     }
     crate::decode::gif(&data, &cfg.image_limits, work)
+}
+
+fn resolve_display_mode(proto_mode: ProtoDisplayMode, mime_type: &str) -> DisplayMode {
+    match proto_mode {
+        ProtoDisplayMode::Static => DisplayMode::Static,
+        ProtoDisplayMode::Scroll => DisplayMode::ScrollHorizontal,
+        ProtoDisplayMode::Unspecified => {
+            if is_ppm(mime_type) {
+                DisplayMode::ScrollHorizontal
+            } else {
+                DisplayMode::Static
+            }
+        }
+    }
 }
 
 /// Play the WAV file at `path` in a background thread.
@@ -433,6 +423,7 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(1));
         assert!(state.borrow().polls > 0);
     }
+
     #[test]
     fn rejected_image_does_not_block_next_request() {
         let shutdown = Shutdown::new();
@@ -451,5 +442,29 @@ mod tests {
         run_loop(Box::new(FakeDisplay(state.clone())), rx, &cfg, &shutdown).unwrap();
         assert_eq!(state.borrow().renders, 1);
         assert!(state.borrow().clears >= 2);
+    }
+
+    #[test]
+    fn eyecatch_uses_request_deadline_and_skips_main_decode_when_expired() {
+        let shutdown = Shutdown::new();
+        let state = Rc::new(RefCell::new(State::default()));
+        let mut display = FakeDisplay(state.clone());
+        let cfg = test_support::config();
+        let work = Work {
+            shutdown: &shutdown,
+            deadline: Instant::now() + Duration::from_millis(25),
+        };
+        let mut frames = Some(vec![AnimFrame {
+            image: image::DynamicImage::new_rgb8(4, 2),
+            delay: Duration::from_secs(5),
+        }]);
+        let mut req = request();
+        req.image_data = b"invalid main image".to_vec();
+        let start = Instant::now();
+        let err =
+            process_request(&mut display, &req, &cfg, &work, &mut frames, &mut true).unwrap_err();
+        assert!(err.is::<Stopped>());
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(state.borrow().renders > 0);
     }
 }

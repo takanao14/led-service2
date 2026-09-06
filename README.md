@@ -102,7 +102,7 @@ The server exits with a non-zero status if gRPC startup or serving fails (for ex
 | `PANEL_BRIGHTNESS` | `50` | Brightness (0–100, RPi only) |
 | `PANEL_REFRESH_RATE` | `120` | Refresh rate in Hz (RPi only) |
 | `PANEL_SLOWDOWN` | unset | GPIO slowdown factor (RPi only) |
-| `WORKER_TIMEOUT` | `30s` | Maximum display time per request (e.g. `60s`) |
+| `WORKER_TIMEOUT` | `30s` | Maximum total processing time per dequeued request, including eye-catch and decoding (e.g. `60s`) |
 | `SCROLL_INTERVAL_MS` | `30` | Scroll speed in milliseconds per pixel |
 | `EYECATCH_PATH` | unset | Path to GIF file shown on request received |
 | `EYECATCH_DURATION_MS` | `3000` | Eye-catch display duration in milliseconds |
@@ -167,11 +167,11 @@ service ImageService {
 
 The request queue capacity is 10. When full, `RESOURCE_EXHAUSTED` is returned. During shutdown or after the worker stops, requests return `UNAVAILABLE`.
 
-The eye-catch is preloaded at startup using the same image limits and a 4 MiB file limit.
-
 `SendImage` acknowledges queue admission, not successful decoding or display. Invalid or oversized images are rejected by the worker and logged; subsequent requests continue. The gRPC receive limit remains 4 MiB per message.
 
-Cancellation is checked at decoder reads, between GIF frames, during resizing, and between display refreshes. These are cooperative checks: a codec operation already using buffered data or a blocking backend call must return before cancellation takes effect. Image limits bound application-owned buffers; decoder allocation limits are best-effort, and these settings are not a total process RSS limit. Cached eye-catch frames, the current image, render buffers, and queued compressed payloads can coexist.
+Each request receives a deadline when dequeued: the smaller of `duration_seconds` and `WORKER_TIMEOUT`. This budget includes eye-catch loading/playback, decoding, resizing, and main image display; queue waiting is excluded. The eye-catch is loaded on the first request and cached after successful decoding, with the same image limits and a 4 MiB file limit. If the budget expires during the eye-catch, the main image is skipped. Jingle audio plays independently of the request deadline.
+
+Cancellation and deadlines are checked at decoder reads, between GIF frames, during resizing, and between display refreshes. These are cooperative checks: a codec operation already using buffered data or a blocking backend call must return before cancellation takes effect. Image limits bound application-owned buffers; decoder allocation limits are best-effort, and these settings are not a total process RSS limit. Cached eye-catch frames, the current image, render buffers, and queued compressed payloads can coexist.
 
 SIGINT, SIGTERM, closing the emulator window, or pressing Escape stops the worker and discards queued requests. Existing emulator windows continue processing events while idle. gRPC connections get up to two seconds for graceful shutdown. No emulator window is opened until the first frame is displayed.
 

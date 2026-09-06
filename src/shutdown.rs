@@ -60,7 +60,7 @@ mod tests {
     }
 }
 
-/// Shared cancellation with the display loop deadline.
+/// Cooperative cancellation and deadline checks between bounded units of work.
 pub struct Work<'a> {
     pub shutdown: &'a Shutdown,
     pub deadline: std::time::Instant,
@@ -71,6 +71,9 @@ impl Work<'_> {
         if self.shutdown.is_cancelled() {
             return Err(Stopped::Shutdown.into());
         }
+        if std::time::Instant::now() >= self.deadline {
+            return Err(Stopped::Deadline.into());
+        }
         Ok(())
     }
 }
@@ -79,4 +82,6 @@ impl Work<'_> {
 pub enum Stopped {
     #[error("shutdown requested")]
     Shutdown,
+    #[error("request deadline exceeded")]
+    Deadline,
 }
