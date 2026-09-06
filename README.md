@@ -155,7 +155,9 @@ service ImageService {
 }
 ```
 
-The request queue capacity is 10. When full, `RESOURCE_EXHAUSTED` is returned.
+The request queue capacity is 10. When full, `RESOURCE_EXHAUSTED` is returned. During shutdown or after the worker stops, requests return `UNAVAILABLE`.
+
+SIGINT, SIGTERM, closing the emulator window, or pressing Escape stops the worker and discards queued requests. Existing emulator windows continue processing events while idle. gRPC connections get up to two seconds for graceful shutdown. No emulator window is opened until the first frame is displayed.
 
 ## Cargo Features
 

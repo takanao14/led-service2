@@ -1,4 +1,5 @@
-use std::sync::mpsc::SyncSender;
+use crate::shutdown::Shutdown;
+use std::sync::mpsc::{SyncSender, TrySendError};
 use std::time::Duration;
 
 use tonic::{Request, Response, Status};
@@ -15,12 +16,13 @@ use crate::worker::DisplayRequest;
 pub struct LedImageService {
     /// Sender side of the bounded display queue (capacity 10).
     queue_tx: SyncSender<DisplayRequest>,
+    shutdown: Shutdown,
 }
 
 impl LedImageService {
     /// Create a new service that enqueues display requests onto `queue_tx`.
-    pub fn new(queue_tx: SyncSender<DisplayRequest>) -> Self {
-        Self { queue_tx }
+    pub fn new(queue_tx: SyncSender<DisplayRequest>, shutdown: Shutdown) -> Self {
+        Self { queue_tx, shutdown }
     }
 }
 
@@ -35,6 +37,9 @@ impl ImageService for LedImageService {
         &self,
         request: Request<SendImageRequest>,
     ) -> Result<Response<SendImageResponse>, Status> {
+        if self.shutdown.is_cancelled() {
+            return Err(Status::unavailable("display service is shutting down"));
+        }
         let req = request.into_inner();
 
         let image = req
@@ -56,9 +61,10 @@ impl ImageService for LedImageService {
                 .unwrap_or(DisplayMode::Unspecified),
         };
 
-        self.queue_tx
-            .try_send(display_req)
-            .map_err(|_| Status::resource_exhausted("display queue is full"))?;
+        self.queue_tx.try_send(display_req).map_err(|e| match e {
+            TrySendError::Full(_) => Status::resource_exhausted("display queue is full"),
+            TrySendError::Disconnected(_) => Status::unavailable("display worker has stopped"),
+        })?;
 
         tracing::info!(duration_seconds = req.duration_seconds, "request queued");
 
@@ -66,5 +72,44 @@ impl ImageService for LedImageService {
             success: true,
             message: "queued".to_string(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proto::ImageData;
+
+    fn request() -> Request<SendImageRequest> {
+        Request::new(SendImageRequest {
+            image: Some(ImageData {
+                image_data: vec![1],
+                mime_type: "image/png".into(),
+            }),
+            duration_seconds: 1,
+            display_mode: 0,
+        })
+    }
+
+    #[tokio::test]
+    async fn distinguishes_full_disconnected_and_stopping() {
+        let shutdown = Shutdown::new();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let service = LedImageService::new(tx, shutdown.clone());
+        service.send_image(request()).await.unwrap();
+        assert_eq!(
+            service.send_image(request()).await.unwrap_err().code(),
+            tonic::Code::ResourceExhausted
+        );
+        drop(rx);
+        assert_eq!(
+            service.send_image(request()).await.unwrap_err().code(),
+            tonic::Code::Unavailable
+        );
+        shutdown.cancel();
+        assert_eq!(
+            service.send_image(request()).await.unwrap_err().code(),
+            tonic::Code::Unavailable
+        );
     }
 }

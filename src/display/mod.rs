@@ -3,6 +3,7 @@ use image::{DynamicImage, GenericImageView};
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
+use crate::shutdown::Shutdown;
 
 // ---------------------------------------------------------------------------
 // Image scaling helpers
@@ -93,6 +94,11 @@ pub trait LedDisplay {
     /// emulator window has been closed; callers should exit gracefully on this error.
     fn render_frame(&mut self, pixels: &[(u8, u8, u8)]) -> Result<()>;
 
+    /// Pump backend events without opening a new window while idle.
+    fn poll_events(&mut self) -> Result<()> {
+        Ok(())
+    }
+
     /// Clear the panel to all black.
     fn clear(&mut self) -> Result<()>;
 }
@@ -120,6 +126,7 @@ pub fn show(
     deadline: Instant,
     mode: DisplayMode,
     scroll_interval: Duration,
+    shutdown: &Shutdown,
 ) -> Result<()> {
     let rows = display.rows();
     let cols = display.cols();
@@ -142,13 +149,8 @@ pub fn show(
     let mut pixels = Vec::with_capacity(rows * cols);
     fill_pixels(&mut pixels, &panel, x_offset, rows, cols);
 
-    while Instant::now() < deadline {
-        if let Err(e) = display.render_frame(&pixels) {
-            if e.is::<WindowClosedError>() {
-                return Ok(());
-            }
-            return Err(e);
-        }
+    while !shutdown.is_cancelled() && Instant::now() < deadline {
+        display.render_frame(&pixels)?;
 
         if mode == DisplayMode::ScrollHorizontal && last_scroll.elapsed() >= scroll_interval {
             x_offset = (x_offset + 1) % img_w;
@@ -169,6 +171,7 @@ pub fn show_animated(
     display: &mut dyn LedDisplay,
     frames: &[AnimFrame],
     deadline: Instant,
+    shutdown: &Shutdown,
 ) -> Result<()> {
     if frames.is_empty() {
         return Ok(());
@@ -190,17 +193,12 @@ pub fn show_animated(
         .collect();
 
     let mut frame_idx = 0;
-    while Instant::now() < deadline {
+    while !shutdown.is_cancelled() && Instant::now() < deadline {
         let (pixels, delay) = &panels[frame_idx % panels.len()];
         let frame_end = (Instant::now() + *delay).min(deadline);
 
-        while Instant::now() < frame_end {
-            if let Err(e) = display.render_frame(pixels) {
-                if e.is::<WindowClosedError>() {
-                    return Ok(());
-                }
-                return Err(e);
-            }
+        while !shutdown.is_cancelled() && Instant::now() < frame_end {
+            display.render_frame(pixels)?;
             let remaining = frame_end.saturating_duration_since(Instant::now());
             // Sleep only if render_frame returns quickly (emulator).
             // On RPi, update_on_vsync already blocks for the frame duration.
@@ -245,7 +243,7 @@ fn fill_pixels(
 /// window has been closed by the user.
 ///
 /// Callers detect this via [`anyhow::Error::is::<WindowClosedError>()`] and
-/// exit display loops cleanly without propagating the error.
+/// propagate it to the worker to stop the server.
 #[derive(Debug, thiserror::Error)]
 #[error("window closed")]
 pub struct WindowClosedError;

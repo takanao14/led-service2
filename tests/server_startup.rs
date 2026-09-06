@@ -51,3 +51,63 @@ fn occupied_port_causes_nonzero_exit() {
         "missing listen address: {stderr}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn sigterm_stops_idle_server_with_open_connection() {
+    use std::net::TcpStream;
+
+    struct ChildGuard(std::process::Child);
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = reservation.local_addr().unwrap();
+    drop(reservation);
+    let mut child = ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_led-server"))
+            .env("GRPC_ADDR", addr.to_string())
+            .env_remove("EYECATCH_PATH")
+            .env_remove("JINGLE_PATH")
+            .env_remove("WORKER_TIMEOUT")
+            .env("PANEL_ROWS", "32")
+            .env("PANEL_COLS", "64")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let startup_deadline = Instant::now() + Duration::from_secs(10);
+    // Keep a connection open without sending an HTTP/2 handshake.
+    let _connection = loop {
+        if let Ok(connection) = TcpStream::connect(addr) {
+            break connection;
+        }
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "server exited before listening"
+        );
+        assert!(Instant::now() < startup_deadline, "server did not start");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    // Give serve_with_shutdown time to install its signal handlers.
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(Command::new("/bin/kill")
+        .args(["-TERM", &child.0.id().to_string()])
+        .status()
+        .unwrap()
+        .success());
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert!(status.success(), "shutdown was not graceful: {status}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "server did not stop promptly");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}

@@ -1,6 +1,7 @@
 mod config;
 mod display;
 mod service;
+mod shutdown;
 mod worker;
 
 // Re-export the proto module from the library crate so that submodules can
@@ -49,43 +50,56 @@ fn main() -> anyhow::Result<()> {
     // gRPC server runs in a background thread so the main thread stays free
     // for the display loop.
     let cfg_grpc = cfg.clone();
+    let shutdown = shutdown::Shutdown::new();
+    let grpc_shutdown = shutdown.clone();
     let grpc_handle = std::thread::spawn(move || -> anyhow::Result<()> {
+        let _guard = grpc_shutdown.guard();
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .context("failed to build tokio runtime")?
             .block_on(async move {
                 let addr = cfg_grpc.grpc_addr;
-                let svc = LedImageService::new(tx);
+                let svc = LedImageService::new(tx, grpc_shutdown.clone());
 
                 tracing::info!(%addr, "starting gRPC server");
-                Server::builder()
+                let server = Server::builder()
                     .add_service(ImageServiceServer::new(svc))
-                    .serve_with_shutdown(addr, shutdown_signal())
-                    .await
-                    .with_context(|| format!("gRPC server failed at {addr}"))?;
+                    .serve_with_shutdown(addr, async {
+                        tokio::select! {
+                            _ = shutdown_signal() => grpc_shutdown.cancel(),
+                            _ = grpc_shutdown.cancelled() => {},
+                        }
+                    });
+                tokio::pin!(server);
+                let result = tokio::select! {
+                    result = &mut server => result,
+                    _ = grpc_shutdown.cancelled() => {
+                        match tokio::time::timeout(std::time::Duration::from_secs(2), &mut server).await {
+                            Ok(result) => result,
+                            Err(_) => {
+                                tracing::warn!("gRPC graceful shutdown exceeded 2 seconds; closing connections");
+                                Ok(())
+                            }
+                        }
+                    }
+                };
+                result.with_context(|| format!("gRPC server failed at {addr}"))?;
                 tracing::info!("gRPC server stopped");
                 Ok(())
             })
     });
 
     // Display loop must run on the main thread (minifb requires Cocoa on macOS).
-    let display = display::create(&cfg)?;
-    worker::run_loop(
-        display,
-        rx,
-        cfg.worker_timeout,
-        cfg.scroll_interval,
-        cfg.jingle_path,
-        cfg.eyecatch_path,
-        cfg.eyecatch_duration,
-    );
+    let worker_result =
+        display::create(&cfg).and_then(|display| worker::run_loop(display, rx, &cfg, &shutdown));
+    shutdown.cancel();
 
     grpc_handle
         .join()
         .map_err(|_| anyhow::anyhow!("gRPC server thread panicked"))??;
 
-    Ok(())
+    worker_result
 }
 
 /// Wait for SIGINT (Ctrl+C) or SIGTERM and return.
@@ -116,3 +130,6 @@ async fn shutdown_signal() {
 
     tracing::info!("shutdown signal received");
 }
+
+#[cfg(test)]
+mod test_support;

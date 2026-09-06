@@ -1,4 +1,6 @@
-use std::sync::mpsc::Receiver;
+use crate::config::Config;
+use crate::shutdown::Shutdown;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use crate::display::{AnimFrame, DisplayMode, LedDisplay};
@@ -25,14 +27,12 @@ pub struct DisplayRequest {
 pub fn run_loop(
     mut display: Box<dyn LedDisplay>,
     rx: Receiver<DisplayRequest>,
-    worker_timeout: Duration,
-    scroll_interval: Duration,
-    jingle_path: Option<String>,
-    eyecatch_path: Option<String>,
-    eyecatch_duration: Duration,
-) {
+    cfg: &Config,
+    shutdown: &Shutdown,
+) -> anyhow::Result<()> {
+    let _guard = shutdown.guard();
     // Pre-decode the eye-catch GIF once so it is ready for every request.
-    let eyecatch_frames: Option<Vec<AnimFrame>> = eyecatch_path.as_deref().and_then(|path| {
+    let eyecatch_frames: Option<Vec<AnimFrame>> = cfg.eyecatch_path.as_deref().and_then(|path| {
         match std::fs::read(path)
             .map_err(anyhow::Error::from)
             .and_then(|data| decode_gif(&data))
@@ -45,7 +45,21 @@ pub fn run_loop(
         }
     });
 
-    for req in rx.iter() {
+    while !shutdown.is_cancelled() {
+        if let Err(e) = display.poll_events() {
+            if e.is::<crate::display::WindowClosedError>() {
+                break;
+            }
+            return Err(e);
+        }
+        let req = match rx.recv_timeout(Duration::from_millis(16)) {
+            Ok(req) => req,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        if shutdown.is_cancelled() {
+            break;
+        }
         tracing::info!(
             duration = ?req.duration,
             mime_type = %req.mime_type,
@@ -53,19 +67,23 @@ pub fn run_loop(
         );
 
         // Play jingle regardless of whether an eye-catch is configured.
-        if let Some(ref path) = jingle_path {
+        if let Some(ref path) = cfg.jingle_path {
             play_jingle(path);
         }
         // Show eye-catch GIF if configured (jingle plays concurrently above).
         if let Some(ref frames) = eyecatch_frames {
-            let eyecatch_deadline = Instant::now() + eyecatch_duration;
-            if let Err(e) = crate::display::show_animated(&mut *display, frames, eyecatch_deadline)
+            let eyecatch_deadline = Instant::now() + cfg.eyecatch_duration;
+            if let Err(e) =
+                crate::display::show_animated(&mut *display, frames, eyecatch_deadline, shutdown)
             {
+                if e.is::<crate::display::WindowClosedError>() {
+                    break;
+                }
                 tracing::warn!(error = %e, "eye-catch display error");
             }
         }
 
-        let deadline = Instant::now() + req.duration.min(worker_timeout);
+        let deadline = Instant::now() + req.duration.min(cfg.worker_timeout);
         let result = if is_gif(&req.mime_type) {
             if req.display_mode != ProtoDisplayMode::Unspecified {
                 tracing::warn!(
@@ -73,7 +91,7 @@ pub fn run_loop(
                     "display_mode is ignored for animated GIF"
                 );
             }
-            run_animated(&mut *display, &req.image_data, deadline)
+            run_animated(&mut *display, &req.image_data, deadline, shutdown)
         } else {
             let mode = resolve_display_mode(req.display_mode, &req.mime_type);
             run_static(
@@ -81,16 +99,20 @@ pub fn run_loop(
                 &req.image_data,
                 mode,
                 deadline,
-                scroll_interval,
+                cfg.scroll_interval,
+                shutdown,
             )
         };
 
         match result {
             Ok(()) => tracing::info!("display done"),
+            Err(e) if e.is::<crate::display::WindowClosedError>() => break,
             Err(e) => tracing::error!(error = %e, "display error"),
         }
     }
+    display.clear()?;
     tracing::info!("worker stopped");
+    Ok(())
 }
 
 fn run_static(
@@ -99,18 +121,20 @@ fn run_static(
     mode: DisplayMode,
     deadline: Instant,
     scroll_interval: Duration,
+    shutdown: &Shutdown,
 ) -> anyhow::Result<()> {
     let img = decode_image(data)?;
-    crate::display::show(display, &img, deadline, mode, scroll_interval)
+    crate::display::show(display, &img, deadline, mode, scroll_interval, shutdown)
 }
 
 fn run_animated(
     display: &mut dyn LedDisplay,
     data: &[u8],
     deadline: Instant,
+    shutdown: &Shutdown,
 ) -> anyhow::Result<()> {
     let frames = decode_gif(data)?;
-    crate::display::show_animated(display, &frames, deadline)
+    crate::display::show_animated(display, &frames, deadline, shutdown)
 }
 
 /// Resolve the effective [`DisplayMode`] from the proto request field and mime_type fallback.
@@ -338,4 +362,91 @@ fn is_gif(mime_type: &str) -> bool {
 
 fn is_ppm(mime_type: &str) -> bool {
     mime_type.contains("portable-pixmap") || mime_type.contains("ppm") || mime_type.contains("pnm")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{self, FakeDisplay, State};
+    use std::{cell::RefCell, rc::Rc};
+
+    fn request() -> DisplayRequest {
+        DisplayRequest {
+            image_data: test_support::png(4, 2),
+            mime_type: "image/png".into(),
+            duration: Duration::from_secs(30),
+            display_mode: ProtoDisplayMode::Static,
+        }
+    }
+
+    #[test]
+    fn cancellation_during_display_discards_full_queue() {
+        let shutdown = Shutdown::new();
+        let state = Rc::new(RefCell::new(State {
+            cancel_on_render: Some(shutdown.clone()),
+            ..State::default()
+        }));
+        let (tx, rx) = std::sync::mpsc::sync_channel(10);
+        for _ in 0..10 {
+            tx.send(request()).unwrap();
+        }
+        run_loop(
+            Box::new(FakeDisplay(state.clone())),
+            rx,
+            &test_support::config(),
+            &shutdown,
+        )
+        .unwrap();
+        assert_eq!(state.borrow().renders, 1);
+        assert!(state.borrow().clears > 0);
+        assert!(tx.send(request()).is_err());
+    }
+
+    #[test]
+    fn window_close_stops_server_while_idle_or_rendering() {
+        for idle in [true, false] {
+            let shutdown = Shutdown::new();
+            let state = Rc::new(RefCell::new(State {
+                close_on_poll: idle,
+                close_on_render: !idle,
+                ..State::default()
+            }));
+            let (tx, rx) = std::sync::mpsc::sync_channel(10);
+            if !idle {
+                tx.send(request()).unwrap();
+            }
+            run_loop(
+                Box::new(FakeDisplay(state.clone())),
+                rx,
+                &test_support::config(),
+                &shutdown,
+            )
+            .unwrap();
+            assert!(shutdown.is_cancelled());
+            assert_eq!(state.borrow().renders, usize::from(!idle));
+        }
+    }
+
+    #[test]
+    fn idle_worker_observes_external_shutdown() {
+        let shutdown = Shutdown::new();
+        let trigger = shutdown.clone();
+        let thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(25));
+            trigger.cancel();
+        });
+        let state = Rc::new(RefCell::new(State::default()));
+        let (_tx, rx) = std::sync::mpsc::sync_channel(10);
+        let start = Instant::now();
+        run_loop(
+            Box::new(FakeDisplay(state.clone())),
+            rx,
+            &test_support::config(),
+            &shutdown,
+        )
+        .unwrap();
+        thread.join().unwrap();
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(state.borrow().polls > 0);
+    }
 }

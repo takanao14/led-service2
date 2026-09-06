@@ -98,12 +98,22 @@ impl LedDisplay for EmulatorDisplay {
         Ok(())
     }
 
+    fn poll_events(&mut self) -> Result<()> {
+        if let Some(win) = self.window.as_mut() {
+            win.update();
+            if !win.is_open() || win.is_key_down(Key::Escape) {
+                return Err(super::WindowClosedError.into());
+            }
+        }
+        Ok(())
+    }
+
     fn clear(&mut self) -> Result<()> {
-        let win_w = self.win_w;
-        let win_h = self.win_h;
-        let black = vec![0u32; win_w * win_h];
-        if let Ok(win) = self.window() {
-            let _ = win.update_with_buffer(&black, win_w, win_h);
+        if let Some(win) = self.window.as_mut() {
+            if win.is_open() && !win.is_key_down(Key::Escape) {
+                let black = vec![0u32; self.win_w * self.win_h];
+                win.update_with_buffer(&black, self.win_w, self.win_h)?;
+            }
         }
         Ok(())
     }
