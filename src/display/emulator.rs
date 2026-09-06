@@ -1,9 +1,14 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use minifb::{Key, Window, WindowOptions};
 
 use crate::config::Config;
 
 use super::LedDisplay;
+
+/// Pause after presenting a frame, pacing the emulator window at ~60 fps.
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 /// Scale factor: each LED pixel is rendered as SCALE x SCALE screen pixels.
 const SCALE: usize = 10;
@@ -94,7 +99,7 @@ impl LedDisplay for EmulatorDisplay {
         }
         win.update_with_buffer(&buffer, win_w, win_h)
             .map_err(|e| anyhow::anyhow!("minifb update: {e}"))?;
-        std::thread::sleep(super::FRAME_INTERVAL);
+        std::thread::sleep(FRAME_INTERVAL);
         Ok(())
     }
 

@@ -30,8 +30,6 @@ pub trait LedDisplay {
     fn clear(&mut self) -> Result<()>;
 }
 
-const FRAME_INTERVAL: Duration = Duration::from_millis(16);
-
 #[derive(Clone, Copy)]
 enum Scale {
     Width,
@@ -227,7 +225,7 @@ mod rpi;
 pub fn create(cfg: &Config) -> Result<Box<dyn LedDisplay>> {
     #[cfg(feature = "rpi")]
     {
-        return rpi::RpiDisplay::new(cfg).map(|d| Box::new(d) as Box<dyn LedDisplay>);
+        rpi::RpiDisplay::new(cfg).map(|d| Box::new(d) as Box<dyn LedDisplay>)
     }
     #[cfg(not(feature = "rpi"))]
     {
