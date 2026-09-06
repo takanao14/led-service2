@@ -25,7 +25,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev build-essential protobuf-compiler
 
       - name: Build
-        run: cargo build --release --bin led-server --features rpi --no-default-features
+        run: cargo build --locked --release --bin led-server --features rpi --no-default-features
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
