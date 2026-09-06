@@ -56,9 +56,9 @@ impl ImageService for LedImageService {
                 .unwrap_or(DisplayMode::Unspecified),
         };
 
-        self.queue_tx.try_send(display_req).map_err(|_| {
-            Status::resource_exhausted("display queue is full")
-        })?;
+        self.queue_tx
+            .try_send(display_req)
+            .map_err(|_| Status::resource_exhausted("display queue is full"))?;
 
         tracing::info!(duration_seconds = req.duration_seconds, "request queued");
 

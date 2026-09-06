@@ -62,19 +62,17 @@ fn detect_mime(path: &str) -> Option<&'static str> {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let image_data = std::fs::read(&args.file)
-        .with_context(|| format!("failed to read file: {}", args.file))?;
+    let image_data =
+        std::fs::read(&args.file).with_context(|| format!("failed to read file: {}", args.file))?;
 
-    let mime_type = args.mime.unwrap_or_else(|| {
-        match detect_mime(&args.file) {
-            Some(m) => m.to_string(),
-            None => {
-                eprintln!(
-                    "warning: unknown file extension for '{}', assuming image/png",
-                    args.file
-                );
-                "image/png".to_string()
-            }
+    let mime_type = args.mime.unwrap_or_else(|| match detect_mime(&args.file) {
+        Some(m) => m.to_string(),
+        None => {
+            eprintln!(
+                "warning: unknown file extension for '{}', assuming image/png",
+                args.file
+            );
+            "image/png".to_string()
         }
     });
 

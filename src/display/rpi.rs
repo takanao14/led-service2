@@ -19,12 +19,16 @@ impl RpiDisplay {
         options.set_hardware_mapping("regular");
         options.set_rows(cfg.panel_rows);
         options.set_cols(cfg.panel_cols);
-        options.set_brightness(cfg.panel_brightness).map_err(|e| anyhow::anyhow!("brightness: {e}"))?;
+        options
+            .set_brightness(cfg.panel_brightness)
+            .map_err(|e| anyhow::anyhow!("brightness: {e}"))?;
         if cfg.panel_refresh_rate > 0 {
             options.set_limit_refresh(cfg.panel_refresh_rate as u32);
         }
         options.set_refresh_rate(false);
-        options.set_pwm_bits(cfg.panel_pwm_bits as u8).map_err(|e| anyhow::anyhow!("pwm_bits: {e}"))?;
+        options
+            .set_pwm_bits(cfg.panel_pwm_bits as u8)
+            .map_err(|e| anyhow::anyhow!("pwm_bits: {e}"))?;
         options.set_pwm_lsb_nanoseconds(cfg.panel_pwm_lsb_nanoseconds);
         options.set_pwm_dither_bits(0);
         // Disable hardware pulsing (PWM/PCM DMA) to prevent USB bus interference on RPi 3.
@@ -59,13 +63,23 @@ impl LedDisplay for RpiDisplay {
     }
 
     fn render_frame(&mut self, pixels: &[(u8, u8, u8)]) -> Result<()> {
-        let mut canvas = self.canvas.take()
+        let mut canvas = self
+            .canvas
+            .take()
             .ok_or_else(|| anyhow::anyhow!("canvas unavailable (lost after a previous panic?)"))?;
 
         for (i, &(r, g, b)) in pixels.iter().enumerate() {
             let x = (i % self.cols) as i32;
             let y = (i / self.cols) as i32;
-            canvas.set(x, y, &LedColor { red: r, green: g, blue: b });
+            canvas.set(
+                x,
+                y,
+                &LedColor {
+                    red: r,
+                    green: g,
+                    blue: b,
+                },
+            );
         }
 
         self.canvas = Some(self.matrix.swap(canvas));
@@ -73,7 +87,9 @@ impl LedDisplay for RpiDisplay {
     }
 
     fn clear(&mut self) -> Result<()> {
-        let mut canvas = self.canvas.take()
+        let mut canvas = self
+            .canvas
+            .take()
             .ok_or_else(|| anyhow::anyhow!("canvas unavailable (lost after a previous panic?)"))?;
         canvas.clear();
         self.canvas = Some(self.matrix.swap(canvas));

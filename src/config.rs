@@ -49,8 +49,8 @@ impl Config {
             Err(_) => Duration::from_secs(30),
         };
 
-        let panel_rows      = env_parse::<u32>("PANEL_ROWS", 32);
-        let panel_cols      = env_parse::<u32>("PANEL_COLS", 64);
+        let panel_rows = env_parse::<u32>("PANEL_ROWS", 32);
+        let panel_cols = env_parse::<u32>("PANEL_COLS", 64);
 
         // Brightness is 0–100; clamp silently after parsing.
         let panel_brightness = {
@@ -63,15 +63,15 @@ impl Config {
             }
         };
 
-        let scroll_interval_ms      = env_parse::<u64>("SCROLL_INTERVAL_MS", 30);
-        let panel_refresh_rate      = env_parse::<usize>("PANEL_REFRESH_RATE", 120);
-        let panel_slowdown          = env_parse_opt::<u32>("PANEL_SLOWDOWN");
-        let panel_pwm_bits          = env_parse::<u32>("PANEL_PWM_BITS", 11);
+        let scroll_interval_ms = env_parse::<u64>("SCROLL_INTERVAL_MS", 30);
+        let panel_refresh_rate = env_parse::<usize>("PANEL_REFRESH_RATE", 120);
+        let panel_slowdown = env_parse_opt::<u32>("PANEL_SLOWDOWN");
+        let panel_pwm_bits = env_parse::<u32>("PANEL_PWM_BITS", 11);
         let panel_pwm_lsb_nanoseconds = env_parse::<u32>("PANEL_PWM_LSB_NANOSECONDS", 130);
-        let jingle_path             = std::env::var("JINGLE_PATH").ok();
-        let eyecatch_path           = std::env::var("EYECATCH_PATH").ok();
+        let jingle_path = std::env::var("JINGLE_PATH").ok();
+        let eyecatch_path = std::env::var("EYECATCH_PATH").ok();
         // Default: 3000 ms (matches the field-level doc comment).
-        let eyecatch_duration_ms    = env_parse::<u64>("EYECATCH_DURATION_MS", 3000);
+        let eyecatch_duration_ms = env_parse::<u64>("EYECATCH_DURATION_MS", 3000);
 
         Ok(Self {
             grpc_addr,

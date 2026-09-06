@@ -1,7 +1,6 @@
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-
 use crate::display::{AnimFrame, DisplayMode, LedDisplay};
 use crate::proto::DisplayMode as ProtoDisplayMode;
 
@@ -34,7 +33,10 @@ pub fn run_loop(
 ) {
     // Pre-decode the eye-catch GIF once so it is ready for every request.
     let eyecatch_frames: Option<Vec<AnimFrame>> = eyecatch_path.as_deref().and_then(|path| {
-        match std::fs::read(path).map_err(anyhow::Error::from).and_then(|data| decode_gif(&data)) {
+        match std::fs::read(path)
+            .map_err(anyhow::Error::from)
+            .and_then(|data| decode_gif(&data))
+        {
             Ok(frames) => Some(frames),
             Err(e) => {
                 tracing::warn!(error = %e, path = %path, "failed to load eye-catch GIF");
@@ -57,7 +59,8 @@ pub fn run_loop(
         // Show eye-catch GIF if configured (jingle plays concurrently above).
         if let Some(ref frames) = eyecatch_frames {
             let eyecatch_deadline = Instant::now() + eyecatch_duration;
-            if let Err(e) = crate::display::show_animated(&mut *display, frames, eyecatch_deadline) {
+            if let Err(e) = crate::display::show_animated(&mut *display, frames, eyecatch_deadline)
+            {
                 tracing::warn!(error = %e, "eye-catch display error");
             }
         }
@@ -73,7 +76,13 @@ pub fn run_loop(
             run_animated(&mut *display, &req.image_data, deadline)
         } else {
             let mode = resolve_display_mode(req.display_mode, &req.mime_type);
-            run_static(&mut *display, &req.image_data, mode, deadline, scroll_interval)
+            run_static(
+                &mut *display,
+                &req.image_data,
+                mode,
+                deadline,
+                scroll_interval,
+            )
         };
 
         match result {
@@ -153,7 +162,10 @@ fn decode_gif(data: &[u8]) -> anyhow::Result<Vec<AnimFrame>> {
                 // manual `(num + den - 1) / den` idiom flagged by clippy.
                 let ms = (num as u64).div_ceil(den as u64);
                 if ms > 60_000 {
-                    tracing::warn!(delay_ms = ms, "GIF frame delay unusually large, clamping to 60 s");
+                    tracing::warn!(
+                        delay_ms = ms,
+                        "GIF frame delay unusually large, clamping to 60 s"
+                    );
                 }
                 (ms.min(60_000u64) as u32).max(10)
             };
@@ -230,14 +242,16 @@ fn play_via_alsa(path: &str) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("ALSA open {device}: {e}"))?;
 
     {
-        let hwp = HwParams::any(&pcm)
-            .map_err(|e| anyhow::anyhow!("ALSA HwParams: {e}"))?;
+        let hwp = HwParams::any(&pcm).map_err(|e| anyhow::anyhow!("ALSA HwParams: {e}"))?;
         hwp.set_channels(spec.channels as u32)
             .map_err(|e| anyhow::anyhow!("ALSA set_channels: {e}"))?;
         hwp.set_rate(spec.sample_rate, alsa::ValueOr::Nearest)
             .map_err(|e| anyhow::anyhow!("ALSA set_rate: {e}"))?;
-        hwp.set_format(wav_to_alsa_format(spec.sample_format, spec.bits_per_sample)?)
-            .map_err(|e| anyhow::anyhow!("ALSA set_format: {e}"))?;
+        hwp.set_format(wav_to_alsa_format(
+            spec.sample_format,
+            spec.bits_per_sample,
+        )?)
+        .map_err(|e| anyhow::anyhow!("ALSA set_format: {e}"))?;
         hwp.set_access(Access::RWInterleaved)
             .map_err(|e| anyhow::anyhow!("ALSA set_access: {e}"))?;
         pcm.hw_params(&hwp)
@@ -323,7 +337,5 @@ fn is_gif(mime_type: &str) -> bool {
 }
 
 fn is_ppm(mime_type: &str) -> bool {
-    mime_type.contains("portable-pixmap")
-        || mime_type.contains("ppm")
-        || mime_type.contains("pnm")
+    mime_type.contains("portable-pixmap") || mime_type.contains("ppm") || mime_type.contains("pnm")
 }
