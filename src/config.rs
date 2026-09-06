@@ -13,18 +13,23 @@ pub struct Config {
     /// Number of LED panel columns (env: `PANEL_COLS`, default: `64`)
     pub panel_cols: u32,
     /// LED panel brightness, 0–100 (env: `PANEL_BRIGHTNESS`, default: `50`)
+    #[cfg_attr(not(feature = "rpi"), allow(dead_code))]
     pub panel_brightness: u8,
     /// Scroll speed: time between advancing 1 pixel (env: `SCROLL_INTERVAL_MS`, default: `30`)
     pub scroll_interval: Duration,
     /// Optional WAV file to play each time an image is displayed (env: `JINGLE_PATH`)
     pub jingle_path: Option<String>,
     /// Panel refresh rate in Hz (env: `PANEL_REFRESH_RATE`, default: `120`)
+    #[cfg_attr(not(feature = "rpi"), allow(dead_code))]
     pub panel_refresh_rate: usize,
     /// GPIO slowdown factor for RPi (env: `PANEL_SLOWDOWN`, default: unset)
+    #[cfg_attr(not(feature = "rpi"), allow(dead_code))]
     pub panel_slowdown: Option<u32>,
     /// PWM bits (env: `PANEL_PWM_BITS`, default: 11)
+    #[cfg_attr(not(feature = "rpi"), allow(dead_code))]
     pub panel_pwm_bits: u32,
     /// PWM LSB nanoseconds (env: `PANEL_PWM_LSB_NANOSECONDS`, default: 130)
+    #[cfg_attr(not(feature = "rpi"), allow(dead_code))]
     pub panel_pwm_lsb_nanoseconds: u32,
     /// Optional GIF file to show before the main image (env: `EYECATCH_PATH`)
     pub eyecatch_path: Option<String>,
