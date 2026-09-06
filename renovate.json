@@ -1,0 +1,51 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":semanticCommits",
+    ":separateMajorReleases",
+    ":combinePatchMinorReleases",
+    ":rebaseStalePrs"
+  ],
+  "semanticCommitType": "build",
+  "timezone": "Asia/Tokyo",
+  "minimumReleaseAge": "1 day",
+  "labels": ["dependencies", "renovate", "manual-review"],
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "labels": ["dependencies", "renovate", "manual-review", "security"],
+    "assignees": ["takanao14"],
+    "minimumReleaseAge": null
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  },
+  "packageRules": [
+    {
+      "description": "tonic, tonic-build and prost generate and consume the same bindings, so they must move together.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["tonic", "tonic-build", "prost"],
+      "groupName": "tonic and prost"
+    },
+    {
+      "description": "Hardware and platform backends cannot be validated by CI, which only builds the Raspberry Pi target; these updates are reviewed and tested on the device.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["rpi-led-matrix", "minifb", "alsa", "rodio", "hound"],
+      "automerge": false,
+      "labels": ["dependencies", "renovate", "manual-review", "hardware-backend"]
+    },
+    {
+      "description": "Never auto-merge major updates.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "renovate", "manual-review", "major-update"]
+    },
+    {
+      "description": "The led-image-api submodule reference is bumped deliberately together with regenerated bindings.",
+      "matchManagers": ["git-submodules"],
+      "enabled": false
+    }
+  ]
+}
