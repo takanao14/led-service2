@@ -1,5 +1,5 @@
-use crate::config::Config;
-use crate::shutdown::Shutdown;
+use crate::config::{Config, ImageLimits};
+use crate::shutdown::{Shutdown, Work};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
@@ -31,15 +31,15 @@ pub fn run_loop(
     shutdown: &Shutdown,
 ) -> anyhow::Result<()> {
     let _guard = shutdown.guard();
-    // Pre-decode the eye-catch GIF once so it is ready for every request.
-    let eyecatch_frames: Option<Vec<AnimFrame>> = cfg.eyecatch_path.as_deref().and_then(|path| {
-        match std::fs::read(path)
-            .map_err(anyhow::Error::from)
-            .and_then(|data| decode_gif(&data))
-        {
+    let startup_work = Work {
+        shutdown,
+        deadline: Instant::now() + cfg.worker_timeout,
+    };
+    let eyecatch_frames = cfg.eyecatch_path.as_deref().and_then(|path| {
+        match load_eyecatch(path, cfg, &startup_work) {
             Ok(frames) => Some(frames),
             Err(e) => {
-                tracing::warn!(error = %e, path = %path, "failed to load eye-catch GIF");
+                tracing::warn!(error = %e, path, "failed to load eye-catch GIF");
                 None
             }
         }
@@ -70,39 +70,39 @@ pub fn run_loop(
         if let Some(ref path) = cfg.jingle_path {
             play_jingle(path);
         }
-        // Show eye-catch GIF if configured (jingle plays concurrently above).
         if let Some(ref frames) = eyecatch_frames {
-            let eyecatch_deadline = Instant::now() + cfg.eyecatch_duration;
+            let eye_work = Work {
+                shutdown,
+                deadline: Instant::now() + cfg.eyecatch_duration,
+            };
             if let Err(e) =
-                crate::display::show_animated(&mut *display, frames, eyecatch_deadline, shutdown)
+                crate::display::show_animated(&mut *display, frames, &cfg.image_limits, &eye_work)
             {
                 if e.is::<crate::display::WindowClosedError>() {
                     break;
                 }
                 tracing::warn!(error = %e, "eye-catch display error");
             }
+            display.clear()?;
         }
-
-        let deadline = Instant::now() + req.duration.min(cfg.worker_timeout);
+        let work = Work {
+            shutdown,
+            deadline: Instant::now() + req.duration.min(cfg.worker_timeout),
+        };
         let result = if is_gif(&req.mime_type) {
-            if req.display_mode != ProtoDisplayMode::Unspecified {
-                tracing::warn!(
-                    display_mode = ?req.display_mode,
-                    "display_mode is ignored for animated GIF"
-                );
-            }
-            run_animated(&mut *display, &req.image_data, deadline, shutdown)
+            run_animated(&mut *display, &req.image_data, &cfg.image_limits, &work)
         } else {
             let mode = resolve_display_mode(req.display_mode, &req.mime_type);
             run_static(
                 &mut *display,
                 &req.image_data,
                 mode,
-                deadline,
                 cfg.scroll_interval,
-                shutdown,
+                &cfg.image_limits,
+                &work,
             )
         };
+        display.clear()?;
 
         match result {
             Ok(()) => tracing::info!("display done"),
@@ -119,22 +119,22 @@ fn run_static(
     display: &mut dyn LedDisplay,
     data: &[u8],
     mode: DisplayMode,
-    deadline: Instant,
     scroll_interval: Duration,
-    shutdown: &Shutdown,
+    limits: &ImageLimits,
+    work: &Work<'_>,
 ) -> anyhow::Result<()> {
-    let img = decode_image(data)?;
-    crate::display::show(display, &img, deadline, mode, scroll_interval, shutdown)
+    let img = crate::decode::image(data, limits, work)?;
+    crate::display::show(display, &img, mode, scroll_interval, limits, work)
 }
 
 fn run_animated(
     display: &mut dyn LedDisplay,
     data: &[u8],
-    deadline: Instant,
-    shutdown: &Shutdown,
+    limits: &ImageLimits,
+    work: &Work<'_>,
 ) -> anyhow::Result<()> {
-    let frames = decode_gif(data)?;
-    crate::display::show_animated(display, &frames, deadline, shutdown)
+    let frames = crate::decode::gif(data, limits, work)?;
+    crate::display::show_animated(display, &frames, limits, work)
 }
 
 /// Resolve the effective [`DisplayMode`] from the proto request field and mime_type fallback.
@@ -155,50 +155,34 @@ fn resolve_display_mode(proto_mode: ProtoDisplayMode, mime_type: &str) -> Displa
     }
 }
 
-fn decode_image(data: &[u8]) -> anyhow::Result<image::DynamicImage> {
-    image::load_from_memory(data).map_err(Into::into)
-}
-
-/// Decode an animated GIF into a sequence of [`AnimFrame`]s.
-///
-/// Frame delays of 0 default to 100 ms. Delays below 10 ms are clamped to 10 ms.
-fn decode_gif(data: &[u8]) -> anyhow::Result<Vec<AnimFrame>> {
-    use image::codecs::gif::GifDecoder;
-    use image::AnimationDecoder;
-
-    let cursor = std::io::Cursor::new(data);
-    let decoder = GifDecoder::new(cursor)?;
-    let frames = decoder.into_frames().collect_frames()?;
-
-    if frames.is_empty() {
-        anyhow::bail!("GIF has no frames");
+fn load_eyecatch(path: &str, cfg: &Config, work: &Work<'_>) -> anyhow::Result<Vec<AnimFrame>> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    anyhow::ensure!(
+        file.metadata()?.is_file(),
+        "eye-catch must be a regular file"
+    );
+    // Match the bounded gRPC payload size; do not read arbitrary local files into memory.
+    const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+    anyhow::ensure!(
+        file.metadata()?.len() <= MAX_FILE_BYTES,
+        "eye-catch file exceeds 4 MiB"
+    );
+    let mut data = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        work.check()?;
+        let count = file.read(&mut chunk)?;
+        if count == 0 {
+            break;
+        }
+        anyhow::ensure!(
+            data.len() as u64 + count as u64 <= MAX_FILE_BYTES,
+            "eye-catch file exceeds 4 MiB"
+        );
+        data.extend_from_slice(&chunk[..count]);
     }
-
-    frames
-        .into_iter()
-        .map(|f| {
-            // `numer_denom_ms()` returns (u32, u32); cast to u64 to avoid overflow.
-            let (num, den) = f.delay().numer_denom_ms();
-            let delay_ms = if den == 0 || num == 0 {
-                100u32
-            } else {
-                // Use u64 to avoid overflow, then clamp. `div_ceil` avoids the
-                // manual `(num + den - 1) / den` idiom flagged by clippy.
-                let ms = (num as u64).div_ceil(den as u64);
-                if ms > 60_000 {
-                    tracing::warn!(
-                        delay_ms = ms,
-                        "GIF frame delay unusually large, clamping to 60 s"
-                    );
-                }
-                (ms.min(60_000u64) as u32).max(10)
-            };
-            Ok(AnimFrame {
-                image: image::DynamicImage::ImageRgba8(f.into_buffer()),
-                delay: Duration::from_millis(delay_ms as u64),
-            })
-        })
-        .collect()
+    crate::decode::gif(&data, &cfg.image_limits, work)
 }
 
 /// Play the WAV file at `path` in a background thread.
@@ -448,5 +432,24 @@ mod tests {
         thread.join().unwrap();
         assert!(start.elapsed() < Duration::from_secs(1));
         assert!(state.borrow().polls > 0);
+    }
+    #[test]
+    fn rejected_image_does_not_block_next_request() {
+        let shutdown = Shutdown::new();
+        let state = Rc::new(RefCell::new(State {
+            cancel_on_render: Some(shutdown.clone()),
+            ..State::default()
+        }));
+        let (tx, rx) = std::sync::mpsc::sync_channel(10);
+        let mut invalid = request();
+        invalid.image_data = test_support::gif(5, 1, 1);
+        invalid.mime_type = "image/gif".into();
+        tx.send(invalid).unwrap();
+        tx.send(request()).unwrap();
+        let mut cfg = test_support::config();
+        cfg.image_limits.max_dimension = 4;
+        run_loop(Box::new(FakeDisplay(state.clone())), rx, &cfg, &shutdown).unwrap();
+        assert_eq!(state.borrow().renders, 1);
+        assert!(state.borrow().clears >= 2);
     }
 }

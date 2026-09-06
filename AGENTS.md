@@ -6,7 +6,7 @@
 - Keep emulator window operations on the main thread for macOS. Preserve non-blocking gRPC handlers, bounded queue backpressure, and sequential display processing.
 - Keep shared image processing and display loops in `src/display/mod.rs`; hardware-specific behavior belongs in backends behind `LedDisplay`.
 - Centralize runtime configuration in `src/config.rs`; use environment variables and Make variables for deployment overrides.
-- Bound image dimensions, animation frame counts, and decoded memory for Raspberry Pi resource limits. Include decoding and eye-catch playback when considering request deadlines.
+- `src/decode.rs` enforces image limits from `src/config.rs`. Preserve limits on dimensions, frame counts, decoded buffers, and render allocations.
 - `src/shutdown.rs` shares cancellation between the server and display loops; cancellation discards queued requests.
 - Preserve documented hardware workarounds, especially disabled hardware pulsing to prevent USB interference on Raspberry Pi 3.
 - Protobuf definitions live in the `led-image-api/` submodule. Preserve field numbers, regenerate bindings rather than editing generated files, and update the parent repository's submodule reference deliberately.

@@ -59,3 +59,24 @@ mod tests {
         assert!(shutdown.is_cancelled());
     }
 }
+
+/// Shared cancellation with the display loop deadline.
+pub struct Work<'a> {
+    pub shutdown: &'a Shutdown,
+    pub deadline: std::time::Instant,
+}
+
+impl Work<'_> {
+    pub fn check(&self) -> anyhow::Result<()> {
+        if self.shutdown.is_cancelled() {
+            return Err(Stopped::Shutdown.into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Stopped {
+    #[error("shutdown requested")]
+    Shutdown,
+}

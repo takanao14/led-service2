@@ -1,4 +1,5 @@
 mod config;
+mod decode;
 mod display;
 mod service;
 mod shutdown;

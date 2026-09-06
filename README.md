@@ -30,10 +30,16 @@ led-server
 
 | Environment | Requirements |
 |-------------|-------------|
-| macOS (development) | Rust toolchain |
-| Raspberry Pi (production) | Rust toolchain, root privileges (LED panel control), `libasound2-dev` (ALSA audio) |
+| macOS (development) | Rust toolchain, `protoc` |
+| Raspberry Pi (production) | Rust toolchain, root privileges (LED panel control), `build-essential`, `libasound2-dev`, `protobuf-compiler` |
 
 ## Build
+
+Initialize the Protobuf submodule before the first build:
+
+```bash
+git submodule update --init --recursive
+```
 
 ### macOS (emulator)
 
@@ -99,7 +105,11 @@ The server exits with a non-zero status if gRPC startup or serving fails (for ex
 | `WORKER_TIMEOUT` | `30s` | Maximum display time per request (e.g. `60s`) |
 | `SCROLL_INTERVAL_MS` | `30` | Scroll speed in milliseconds per pixel |
 | `EYECATCH_PATH` | unset | Path to GIF file shown on request received |
-| `EYECATCH_DURATION_MS` | `5000` | Eye-catch display duration in milliseconds |
+| `EYECATCH_DURATION_MS` | `3000` | Eye-catch display duration in milliseconds |
+| `MAX_IMAGE_DIMENSION` | `4096` | Maximum input width/height and panel dimensions; must be positive |
+| `MAX_ANIMATION_FRAMES` | `256` | Maximum GIF frames; must be positive |
+| `MAX_DECODED_BYTES` | `67108864` | Decoded buffer budget per image/GIF (64 MiB); GIF splits this between decoder scratch and retained frames |
+| `MAX_RENDER_BYTES` | `16777216` | Limit for render buffer allocations (16 MiB), including checks for scrolling and cached animation frames |
 | `JINGLE_PATH` | unset | Path to WAV file played on request received |
 | `RUST_LOG` | `info` | Log level (`debug` / `info` / `warn` / `error`) |
 | `LOG_FORMAT` | text | Set to `json` for structured JSON logging |
@@ -157,7 +167,15 @@ service ImageService {
 
 The request queue capacity is 10. When full, `RESOURCE_EXHAUSTED` is returned. During shutdown or after the worker stops, requests return `UNAVAILABLE`.
 
+The eye-catch is preloaded at startup using the same image limits and a 4 MiB file limit.
+
+`SendImage` acknowledges queue admission, not successful decoding or display. Invalid or oversized images are rejected by the worker and logged; subsequent requests continue. The gRPC receive limit remains 4 MiB per message.
+
+Cancellation is checked at decoder reads, between GIF frames, during resizing, and between display refreshes. These are cooperative checks: a codec operation already using buffered data or a blocking backend call must return before cancellation takes effect. Image limits bound application-owned buffers; decoder allocation limits are best-effort, and these settings are not a total process RSS limit. Cached eye-catch frames, the current image, render buffers, and queued compressed payloads can coexist.
+
 SIGINT, SIGTERM, closing the emulator window, or pressing Escape stops the worker and discards queued requests. Existing emulator windows continue processing events while idle. gRPC connections get up to two seconds for graceful shutdown. No emulator window is opened until the first frame is displayed.
+
+Local `assets/` files are ignored by Git and absent from a fresh clone. Prepare the required GIF/WAV assets before `sudo make install`, or disable optional paths when running directly.
 
 ## Cargo Features
 

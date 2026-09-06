@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use crate::config::Config;
+use crate::config::{Config, ImageLimits};
 use crate::display::{LedDisplay, WindowClosedError};
 use crate::shutdown::Shutdown;
 
@@ -66,6 +66,7 @@ pub fn config() -> Config {
         panel_pwm_lsb_nanoseconds: 130,
         eyecatch_path: None,
         eyecatch_duration: Duration::from_secs(3),
+        image_limits: ImageLimits::default(),
     }
 }
 
@@ -75,4 +76,17 @@ pub fn png(width: u32, height: u32) -> Vec<u8> {
         .write_to(&mut bytes, image::ImageFormat::Png)
         .unwrap();
     bytes.into_inner()
+}
+
+pub fn gif(width: u32, height: u32, count: usize) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
+        for _ in 0..count {
+            encoder
+                .encode_frame(image::Frame::new(image::RgbaImage::new(width, height)))
+                .unwrap();
+        }
+    }
+    bytes
 }
