@@ -7,6 +7,7 @@ mod worker;
 // continue to use `crate::proto::...` without any changes.
 pub use led_service2::proto;
 
+use anyhow::Context;
 use proto::image_service_server::ImageServiceServer;
 use service::LedImageService;
 use tonic::transport::Server;
@@ -27,7 +28,10 @@ fn main() -> anyhow::Result<()> {
         .add_directive("led_service2=info".parse()?);
 
     if std::env::var("LOG_FORMAT").as_deref() == Ok("json") {
-        tracing_subscriber::fmt().json().with_env_filter(env_filter).init();
+        tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(env_filter)
+            .init();
     } else {
         tracing_subscriber::fmt().with_env_filter(env_filter).init();
     };
@@ -45,25 +49,24 @@ fn main() -> anyhow::Result<()> {
     // gRPC server runs in a background thread so the main thread stays free
     // for the display loop.
     let cfg_grpc = cfg.clone();
-    let grpc_handle = std::thread::spawn(move || {
+    let grpc_handle = std::thread::spawn(move || -> anyhow::Result<()> {
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .expect("failed to build tokio runtime")
+            .context("failed to build tokio runtime")?
             .block_on(async move {
                 let addr = cfg_grpc.grpc_addr;
                 let svc = LedImageService::new(tx);
 
-                tracing::info!(%addr, "gRPC server listening");
-                if let Err(e) = Server::builder()
+                tracing::info!(%addr, "starting gRPC server");
+                Server::builder()
                     .add_service(ImageServiceServer::new(svc))
                     .serve_with_shutdown(addr, shutdown_signal())
                     .await
-                {
-                    tracing::error!(error = %e, "gRPC server error");
-                }
+                    .with_context(|| format!("gRPC server failed at {addr}"))?;
                 tracing::info!("gRPC server stopped");
-            });
+                Ok(())
+            })
     });
 
     // Display loop must run on the main thread (minifb requires Cocoa on macOS).
@@ -78,9 +81,9 @@ fn main() -> anyhow::Result<()> {
         cfg.eyecatch_duration,
     );
 
-    if let Err(e) = grpc_handle.join() {
-        tracing::error!("gRPC server thread panicked: {:?}", e);
-    }
+    grpc_handle
+        .join()
+        .map_err(|_| anyhow::anyhow!("gRPC server thread panicked"))??;
 
     Ok(())
 }
@@ -90,7 +93,9 @@ async fn shutdown_signal() {
     use tokio::signal;
 
     let ctrl_c = async {
-        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     };
 
     #[cfg(unix)]

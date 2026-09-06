@@ -84,6 +84,8 @@ sudo make restart    # restart
 sudo make uninstall  # uninstall
 ```
 
+The server exits with a non-zero status if gRPC startup or serving fails (for example, when the listen port is already in use), allowing systemd `Restart=on-failure` to restart it.
+
 ## Configuration (environment variables)
 
 | Variable | Default | Description |
