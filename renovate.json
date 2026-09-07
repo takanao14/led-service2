@@ -24,6 +24,12 @@
   },
   "packageRules": [
     {
+      "description": "Use version tags for GitHub-authored actions; retain digest pinning for third-party actions.",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["actions/**", "github/**"],
+      "pinDigests": false
+    },
+    {
       "description": "tonic, tonic-prost, tonic-prost-build and prost generate and consume the same bindings, so they must move together.",
       "matchManagers": ["cargo"],
       "matchPackageNames": ["tonic", "tonic-prost", "tonic-prost-build", "prost"],
