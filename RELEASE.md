@@ -8,10 +8,17 @@ libraries are recorded in `build-info.json`; executing `--version` checks that
 the dynamic loader can resolve them before
 activation. CI does not verify LED or audio hardware behavior.
 
-## Build artifacts
+## Publishing
 
-PR and main builds upload temporary ARM64 artifacts for verification.
-The build workflow also supports manual execution.
+1. Update the package version in `Cargo.toml` and `Cargo.lock` together.
+2. Merge the reviewed change after CI passes.
+3. Create and push an annotated matching tag, for example `v0.1.0`.
+
+Tag pushes validate the version, run CI, build the archive, verify its contents
+and checksums, and create a GitHub Release. Tags containing a prerelease suffix
+such as `v0.2.0-rc.1` publish a prerelease. Published releases are not overwritten.
+Release publication never connects to a device. PR and main builds upload
+temporary artifacts for verification; only tagged releases are deployment inputs.
 
 Each release contains a binary archive, a source archive (including the API
 submodule and vendored Cargo dependencies with their license files), and
