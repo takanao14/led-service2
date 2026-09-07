@@ -49,6 +49,9 @@ cargo build --bin led-server
 make build
 ```
 
+Make uses `cargo` from `PATH`. To select a specific installation, pass
+`CARGO=/path/to/cargo` to `make build` or `make run`.
+
 ### Raspberry Pi
 
 **Note:** Because the `rpi-led-matrix` backend is used, building on Raspberry Pi requires a C++ compiler (`build-essential`) and the `rpi-rgb-led-matrix` C++ library.

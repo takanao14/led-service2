@@ -31,7 +31,8 @@ JINGLE_PATH          ?= $(ASSETS_DEST)/splanews.wav
 # gRPC
 GRPC_ADDR ?= 0.0.0.0:50051
 
-CARGO ?= $(HOME)/.cargo/bin/cargo
+# Resolve Cargo through PATH (supports both rustup and Homebrew installations).
+CARGO ?= cargo
 
 RUST_LOG   ?= info
 LOG_FORMAT ?=
