@@ -1,0 +1,89 @@
+---
+- name: Extract original service executable
+  ansible.builtin.set_fact:
+    led_service2_release_original_binary: "{{ led_service2_release_exec.stdout | regex_findall('path=([^ ;]+) ;') | first | default('') }}"
+    led_service2_release_legacy_directory: '{{ led_service2_release_base }}/releases/legacy-{{ ansible_facts.date_time.epoch }}'
+
+- name: Require a simple existing executable without arguments
+  ansible.builtin.assert:
+    that:
+      - led_service2_release_original_binary | length > 0
+      - "('argv[]=' ~ led_service2_release_original_binary ~ ' ;') in led_service2_release_exec.stdout"
+      - led_service2_release_exec.stdout | regex_findall('path=') | length == 1
+
+- name: Create legacy backup directory
+  ansible.builtin.file:
+    path: '{{ led_service2_release_legacy_directory }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Preserve original executable
+  ansible.builtin.copy:
+    src: '{{ led_service2_release_original_binary }}'
+    dest: '{{ led_service2_release_legacy_directory }}/led-server'
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Read effective service configuration
+  ansible.builtin.command:
+    argv: [systemctl, cat, '{{ led_service2_release_service }}']
+  changed_when: false
+  register: led_service2_release_original_unit
+
+- name: Save effective service configuration
+  ansible.builtin.copy:
+    content: "{{ led_service2_release_original_unit.stdout }}\n"
+    dest: '{{ led_service2_release_legacy_directory }}/service-before.txt'
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Ensure drop-in directory exists
+  ansible.builtin.file:
+    path: '{{ led_service2_release_dropin | dirname }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Initialize release service configuration
+  block:
+    - name: Initialize current link to preserved binary
+      ansible.builtin.file:
+        path: '{{ led_service2_release_base }}/current'
+        src: '{{ led_service2_release_legacy_directory }}'
+        state: link
+
+    - name: Override only service executable
+      ansible.builtin.copy:
+        content: "[Service]\nExecStart=\nExecStart={{ led_service2_release_base }}/current/led-server\n"
+        dest: '{{ led_service2_release_dropin }}'
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Reload migrated service configuration
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+  rescue:
+    - name: Remove failed migration override
+      ansible.builtin.file:
+        path: '{{ led_service2_release_dropin }}'
+        state: absent
+
+    - name: Reload original service configuration
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Remove failed migration link
+      ansible.builtin.file:
+        path: '{{ led_service2_release_base }}/current'
+        state: absent
+
+    - name: Report migration failure
+      ansible.builtin.fail:
+        msg: Migration failed; original service configuration restored. Inspect the failed task.

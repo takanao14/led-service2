@@ -32,6 +32,13 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Validate Ansible deployment
+        env:
+          ANSIBLE_CONFIG: ${{ github.workspace }}/ansible/ansible.cfg
+        run: |
+          pipx run ansible-lint ansible/
+          pipx run --spec ansible-core ansible-playbook -i localhost, ansible/tests/archive.yaml
+
   emulator:
     name: Lint and test (emulator)
     # The emulator backend targets macOS development, where minifb owns the

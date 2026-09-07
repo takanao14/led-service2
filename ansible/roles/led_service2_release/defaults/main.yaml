@@ -1,0 +1,9 @@
+---
+led_service2_release_action: deploy
+led_service2_release_repo: takanao14/led-service2
+led_service2_release_probe_url: http://127.0.0.1:50051
+led_service2_release_base: /opt/led-service2
+led_service2_release_service: led-server.service
+led_service2_release_dropin: /etc/systemd/system/led-server.service.d/90-release.conf
+led_service2_release_directory: "{{ led_service2_release_base }}/releases/{{ led_service2_release_version }}"
+led_service2_release_archive: "led-service2_{{ led_service2_release_version }}_linux_arm64.tar.gz"

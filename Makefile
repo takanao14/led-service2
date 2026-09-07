@@ -38,8 +38,15 @@ RUST_LOG   ?= info
 LOG_FORMAT ?=
 
 OS := $(shell uname -s)
+VERSION ?=
+RPI_HOST ?= rpi3
+RELEASE_REPO ?= takanao14/led-service2
+PROBE_URL ?= http://127.0.0.1:50051
+ANSIBLE_PLAYBOOK ?= ansible-playbook
+ANSIBLE_INVENTORY ?= ansible/inventories/homelab/hosts.yaml
+ANSIBLE_ARGS ?=
 
-.PHONY: help build install uninstall start stop restart status deploy run assert-rpi assert-macos
+.PHONY: help build install uninstall start stop restart status deploy run assert-rpi assert-macos deploy-release migrate-release rollback
 
 help:
 	@echo "Usage: make <target>"
@@ -58,6 +65,9 @@ help:
 	@echo "Common targets:"
 	@echo "  build      Build the server (emulator on macOS, rpi feature on RPi)"
 	@echo "  deploy     Sync source to RPi and build there"
+	@echo "  deploy-release VERSION=vX.Y.Z   Install a published release on RPi"
+	@echo "  migrate-release VERSION=vX.Y.Z  Migrate the existing service and install"
+	@echo "  rollback VERSION=vX.Y.Z         Activate an installed release"
 
 assert-rpi:
 	@[ "$(OS)" = "Linux" ] || { echo "Error: '$(MAKECMDGOALS)' is only supported on Raspberry Pi (Linux)."; exit 1; }
@@ -131,6 +141,15 @@ status: assert-rpi
 # Run from macOS: sync source and build on RPi
 deploy:
 	./deploy.sh
+
+deploy-release:
+	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" $(ANSIBLE_PLAYBOOK) -i "$(ANSIBLE_INVENTORY)" ansible/playbooks/ops-led_service2_release.yaml --limit "$(RPI_HOST)" -e "led_service2_release_version=$(VERSION) led_service2_release_action=deploy led_service2_release_repo=$(RELEASE_REPO) led_service2_release_probe_url=$(PROBE_URL)" $(ANSIBLE_ARGS)
+
+migrate-release:
+	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" $(ANSIBLE_PLAYBOOK) -i "$(ANSIBLE_INVENTORY)" ansible/playbooks/ops-led_service2_release.yaml --limit "$(RPI_HOST)" -e "led_service2_release_version=$(VERSION) led_service2_release_action=migrate led_service2_release_repo=$(RELEASE_REPO) led_service2_release_probe_url=$(PROBE_URL)" $(ANSIBLE_ARGS)
+
+rollback:
+	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" $(ANSIBLE_PLAYBOOK) -i "$(ANSIBLE_INVENTORY)" ansible/playbooks/ops-led_service2_release.yaml --limit "$(RPI_HOST)" -e "led_service2_release_version=$(VERSION) led_service2_release_action=rollback led_service2_release_repo=$(RELEASE_REPO) led_service2_release_probe_url=$(PROBE_URL)" $(ANSIBLE_ARGS)
 
 # Build: emulator on macOS, rpi feature on RPi
 ifeq ($(OS),Darwin)

@@ -70,7 +70,7 @@ make deploy
 
 ## Running
 
-Raspberry Pi build artifacts are described in
+Tagged Raspberry Pi binaries and versioned deployment are described in
 [RELEASE.md](RELEASE.md). Use `led-server --version` to inspect the package
 version, or `led-server --check http://127.0.0.1:50051` to probe a running service
 without displaying an image. Startup logs include the version and build revision.

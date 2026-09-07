@@ -1,0 +1,46 @@
+---
+- name: Verify downloaded release before transfer
+  delegate_to: localhost
+  become: false
+  block:
+    - name: Calculate archive SHA-256
+      ansible.builtin.stat:
+        path: '{{ led_service2_release_local.path }}/{{ led_service2_release_archive }}'
+        checksum_algorithm: sha256
+      register: led_service2_release_download
+
+    - name: Read published checksums
+      ansible.builtin.slurp:
+        src: '{{ led_service2_release_local.path }}/checksums.txt'
+      register: led_service2_release_checksums
+
+    - name: Match exact archive checksum entry
+      ansible.builtin.assert:
+        that:
+          - >-
+            (led_service2_release_checksums.content | b64decode).splitlines()
+            | select('match', '^[0-9a-f]{64}  (\./)?' ~ (led_service2_release_archive | regex_escape) ~ '$')
+            | list | length == 1
+          - >-
+            (led_service2_release_download.stat.checksum ~ '  ' ~ led_service2_release_archive)
+            in (led_service2_release_checksums.content | b64decode).splitlines()
+            or (led_service2_release_download.stat.checksum ~ '  ./' ~ led_service2_release_archive)
+            in (led_service2_release_checksums.content | b64decode).splitlines()
+
+    - name: List archive entries
+      ansible.builtin.command:
+        argv: [tar, -tzf, '{{ led_service2_release_local.path }}/{{ led_service2_release_archive }}']
+      changed_when: false
+      register: led_service2_release_entries
+
+    - name: Inspect archive entry types
+      ansible.builtin.command:
+        argv: [tar, -tvzf, '{{ led_service2_release_local.path }}/{{ led_service2_release_archive }}']
+      changed_when: false
+      register: led_service2_release_entry_types
+
+    - name: Reject unexpected paths and links
+      ansible.builtin.assert:
+        that:
+          - led_service2_release_entries.stdout_lines | sort(case_sensitive=true) == ['LICENSE', 'RELEASE.md', 'build-info.json', 'led-server']
+          - led_service2_release_entry_types.stdout_lines | reject('match', '^-') | list | length == 0

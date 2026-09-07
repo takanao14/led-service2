@@ -1,0 +1,118 @@
+---
+- name: Validate release request and device
+  ansible.builtin.assert:
+    that:
+      - led_service2_release_version is defined
+      - led_service2_release_version is match('^v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$')
+      - led_service2_release_action in ['deploy', 'migrate', 'rollback']
+      - ansible_facts.architecture == 'aarch64'
+      - ansible_facts.distribution_release == 'trixie'
+    fail_msg: A pinned version and an ARM64 Debian trixie device are required.
+
+- name: Explain check mode scope
+  ansible.builtin.debug:
+    msg: "Validated inputs and OS. Artifact and service checks require a real deployment run."
+  when: ansible_check_mode
+
+- name: End check mode before downloads or device changes
+  ansible.builtin.meta: end_host
+  when: ansible_check_mode
+
+- name: Ensure release base exists
+  ansible.builtin.file:
+    path: "{{ led_service2_release_base }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Acquire exclusive deployment lock
+  ansible.builtin.command:
+    argv: [mkdir, '{{ led_service2_release_base }}/.ansible-deploy-lock']
+  changed_when: true
+
+- name: Prepare and activate release
+  block:
+    - name: Read existing current link
+      ansible.builtin.stat:
+        path: "{{ led_service2_release_base }}/current"
+        follow: false
+      register: led_service2_release_current
+
+    - name: Read existing service command
+      ansible.builtin.command:
+        argv: [systemctl, show, '{{ led_service2_release_service }}', '--property=ExecStart', '--value']
+      changed_when: false
+      register: led_service2_release_exec
+
+    - name: Read existing migration override
+      ansible.builtin.stat:
+        path: "{{ led_service2_release_dropin }}"
+      register: led_service2_release_override
+
+    - name: Validate service migration state
+      ansible.builtin.assert:
+        that:
+          - >-
+            (led_service2_release_action == 'migrate' and not led_service2_release_current.stat.exists and not led_service2_release_override.stat.exists)
+            or (led_service2_release_action != 'migrate' and led_service2_release_current.stat.islnk | default(false)
+            and ('path=' ~ led_service2_release_base ~ '/current/led-server ;') in led_service2_release_exec.stdout)
+        fail_msg: Use migrate for an existing source installation, deploy or rollback after migration.
+
+    - name: Fetch and stage release
+      ansible.builtin.include_tasks: stage.yaml
+      when: led_service2_release_action != 'rollback'
+
+    - name: Inspect requested installed release
+      ansible.builtin.stat:
+        path: "{{ led_service2_release_directory }}"
+        follow: false
+      register: led_service2_release_target
+
+    - name: Require a real installed release directory
+      ansible.builtin.assert:
+        that:
+          - led_service2_release_target.stat.isdir | default(false)
+          - not led_service2_release_target.stat.islnk | default(false)
+
+    - name: Verify executable version and runtime dependencies
+      ansible.builtin.command:
+        argv: ['{{ led_service2_release_directory }}/led-server', '--version']
+      changed_when: false
+      register: led_service2_release_binary_version
+      failed_when: >-
+        led_service2_release_binary_version.rc != 0 or
+        led_service2_release_binary_version.stdout != 'led-server ' ~ led_service2_release_version[1:]
+
+    - name: Migrate initial service layout
+      ansible.builtin.include_tasks: migrate.yaml
+      when: led_service2_release_action == 'migrate'
+
+    - name: Remember previous release
+      ansible.builtin.set_fact:
+        led_service2_release_previous: >-
+          {{ led_service2_release_legacy_directory if led_service2_release_action == 'migrate'
+             else led_service2_release_current.stat.lnk_source }}
+
+    - name: Activate requested release
+      ansible.builtin.include_tasks: activate.yaml
+
+  always:
+    - name: Remove controller staging directory
+      ansible.builtin.file:
+        path: "{{ led_service2_release_local.path }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      when: led_service2_release_local is defined and led_service2_release_local.path is defined
+
+    - name: Remove device staging directory
+      ansible.builtin.file:
+        path: "{{ led_service2_release_remote.path }}"
+        state: absent
+      when: led_service2_release_remote is defined and led_service2_release_remote.path is defined
+
+    - name: Release deployment lock
+      ansible.builtin.file:
+        path: "{{ led_service2_release_base }}/.ansible-deploy-lock"
+        state: absent

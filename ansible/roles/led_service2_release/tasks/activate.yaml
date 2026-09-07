@@ -1,0 +1,63 @@
+---
+- name: Switch and verify service
+  block:
+    - name: Prepare next current link
+      ansible.builtin.file:
+        path: '{{ led_service2_release_base }}/.current-next'
+        src: '{{ led_service2_release_directory }}'
+        state: link
+        force: true
+      when: led_service2_release_previous != led_service2_release_directory
+
+    - name: Atomically activate requested release
+      ansible.builtin.command:
+        argv: [mv, -Tf, '{{ led_service2_release_base }}/.current-next', '{{ led_service2_release_base }}/current']
+      changed_when: true
+      when: led_service2_release_previous != led_service2_release_directory
+
+    - name: Restart after version change
+      ansible.builtin.systemd_service:
+        name: '{{ led_service2_release_service }}'
+        state: restarted
+      when: led_service2_release_previous != led_service2_release_directory
+
+    - name: Check service stability without displaying images
+      ansible.builtin.include_tasks: probe.yaml
+
+  rescue:
+    - name: Prepare previous release link
+      ansible.builtin.file:
+        path: '{{ led_service2_release_base }}/.current-next'
+        src: '{{ led_service2_release_previous }}'
+        state: link
+        force: true
+
+    - name: Atomically restore previous release
+      ansible.builtin.command:
+        argv: [mv, -Tf, '{{ led_service2_release_base }}/.current-next', '{{ led_service2_release_base }}/current']
+      changed_when: true
+
+    - name: Remove migration override on failed initial activation
+      ansible.builtin.file:
+        path: '{{ led_service2_release_dropin }}'
+        state: absent
+      when: led_service2_release_action == 'migrate'
+
+    - name: Restart previous service
+      ansible.builtin.systemd_service:
+        name: '{{ led_service2_release_service }}'
+        daemon_reload: true
+        state: restarted
+
+    - name: Verify recovered service
+      ansible.builtin.include_tasks: probe.yaml
+
+    - name: Remove initial migration link after recovery
+      ansible.builtin.file:
+        path: '{{ led_service2_release_base }}/current'
+        state: absent
+      when: led_service2_release_action == 'migrate'
+
+    - name: Report failed update after successful recovery
+      ansible.builtin.fail:
+        msg: Requested release failed; previous service recovered. Inspect journalctl before retrying.

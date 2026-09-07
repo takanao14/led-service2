@@ -1,0 +1,6 @@
+---
+all:
+  children:
+    led_devices:
+      hosts:
+        rpi3:

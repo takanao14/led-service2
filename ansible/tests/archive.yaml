@@ -1,0 +1,130 @@
+---
+- name: Test release archive verification without a device
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    led_service2_release_archive: led-service2_v0.1.0_linux_arm64.tar.gz
+  tasks:
+    - name: Create test directory
+      ansible.builtin.tempfile:
+        state: directory
+      register: led_service2_release_local
+
+    - name: Exercise archive verification
+      block:
+        - name: Create fixture files
+          ansible.builtin.copy:
+            content: fixture
+            dest: '{{ led_service2_release_local.path }}/{{ item }}'
+            mode: '0644'
+          loop: [LICENSE, RELEASE.md, build-info.json, led-server]
+
+        - name: Create valid archive
+          ansible.builtin.command:
+            argv:
+              - tar
+              - -czf
+              - '{{ led_service2_release_local.path }}/{{ led_service2_release_archive }}'
+              - -C
+              - '{{ led_service2_release_local.path }}'
+              - LICENSE
+              - RELEASE.md
+              - build-info.json
+              - led-server
+          changed_when: true
+
+        - name: Calculate valid checksum
+          ansible.builtin.stat:
+            path: '{{ led_service2_release_local.path }}/{{ led_service2_release_archive }}'
+            checksum_algorithm: sha256
+          register: fixture_archive
+
+        - name: Write valid checksum
+          ansible.builtin.copy:
+            content: "{{ fixture_archive.stat.checksum }}  ./{{ led_service2_release_archive }}\n"
+            dest: '{{ led_service2_release_local.path }}/checksums.txt'
+            mode: '0644'
+
+        - name: Accept valid archive
+          ansible.builtin.include_role:
+            name: led_service2_release
+            tasks_from: verify_archive
+
+        - name: Corrupt checksum
+          ansible.builtin.copy:
+            content: "{{ '0' * 64 }}  ./{{ led_service2_release_archive }}\n"
+            dest: '{{ led_service2_release_local.path }}/checksums.txt'
+            mode: '0644'
+
+        - name: Expect checksum rejection
+          block:
+            - name: Verify corrupt checksum
+              ansible.builtin.include_role:
+                name: led_service2_release
+                tasks_from: verify_archive
+          rescue:
+            - name: Record expected checksum failure
+              ansible.builtin.set_fact:
+                fixture_checksum_rejected: true
+
+        - name: Require checksum rejection
+          ansible.builtin.assert:
+            that: fixture_checksum_rejected | default(false)
+
+        - name: Replace executable with a symlink fixture
+          ansible.builtin.file:
+            path: '{{ led_service2_release_local.path }}/led-server'
+            state: absent
+
+        - name: Create unsafe executable link
+          ansible.builtin.file:
+            path: '{{ led_service2_release_local.path }}/led-server'
+            src: /etc/passwd
+            state: link
+
+        - name: Archive symlink fixture
+          ansible.builtin.command:
+            argv:
+              - tar
+              - -czf
+              - '{{ led_service2_release_local.path }}/{{ led_service2_release_archive }}'
+              - -C
+              - '{{ led_service2_release_local.path }}'
+              - LICENSE
+              - RELEASE.md
+              - build-info.json
+              - led-server
+          changed_when: true
+
+        - name: Calculate symlink archive checksum
+          ansible.builtin.stat:
+            path: '{{ led_service2_release_local.path }}/{{ led_service2_release_archive }}'
+            checksum_algorithm: sha256
+          register: fixture_archive
+
+        - name: Write matching symlink archive checksum
+          ansible.builtin.copy:
+            content: "{{ fixture_archive.stat.checksum }}  {{ led_service2_release_archive }}\n"
+            dest: '{{ led_service2_release_local.path }}/checksums.txt'
+            mode: '0644'
+
+        - name: Expect symlink rejection
+          block:
+            - name: Verify unsafe archive
+              ansible.builtin.include_role:
+                name: led_service2_release
+                tasks_from: verify_archive
+          rescue:
+            - name: Record expected unsafe archive failure
+              ansible.builtin.set_fact:
+                fixture_link_rejected: true
+
+        - name: Require unsafe archive rejection
+          ansible.builtin.assert:
+            that: fixture_link_rejected | default(false)
+      always:
+        - name: Remove test directory
+          ansible.builtin.file:
+            path: '{{ led_service2_release_local.path }}'
+            state: absent

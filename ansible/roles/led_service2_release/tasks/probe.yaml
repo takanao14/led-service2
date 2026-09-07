@@ -1,0 +1,22 @@
+---
+- name: Wait for gRPC validation response
+  ansible.builtin.command:
+    argv: ['{{ led_service2_release_directory }}/led-server', --check, '{{ led_service2_release_probe_url }}']
+  changed_when: false
+  register: led_service2_release_probe
+  until: led_service2_release_probe.rc == 0
+  retries: 15
+  delay: 1
+
+- name: Confirm consecutive gRPC responses
+  ansible.builtin.command:
+    argv: ['{{ led_service2_release_directory }}/led-server', --check, '{{ led_service2_release_probe_url }}']
+  changed_when: false
+  loop: [1, 2]
+  loop_control:
+    pause: 1
+
+- name: Confirm systemd service is active
+  ansible.builtin.command:
+    argv: [systemctl, is-active, --quiet, '{{ led_service2_release_service }}']
+  changed_when: false

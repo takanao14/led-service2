@@ -1,0 +1,101 @@
+---
+- name: Create controller download directory
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: led-release-
+  delegate_to: localhost
+  become: false
+  register: led_service2_release_local
+
+- name: Download pinned GitHub assets using controller credentials
+  ansible.builtin.command:
+    argv:
+      - gh
+      - release
+      - download
+      - '{{ led_service2_release_version }}'
+      - --repo
+      - '{{ led_service2_release_repo }}'
+      - --pattern
+      - '{{ led_service2_release_archive }}'
+      - --pattern
+      - checksums.txt
+      - --dir
+      - '{{ led_service2_release_local.path }}'
+  delegate_to: localhost
+  become: false
+  changed_when: true
+
+- name: Verify checksum and archive contents on controller
+  ansible.builtin.include_tasks: verify_archive.yaml
+
+- name: Ensure releases directory exists
+  ansible.builtin.file:
+    path: '{{ led_service2_release_base }}/releases'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create device staging directory on release filesystem
+  ansible.builtin.tempfile:
+    state: directory
+    path: '{{ led_service2_release_base }}/releases'
+    prefix: .staging-
+  register: led_service2_release_remote
+
+- name: Extract verified archive
+  ansible.builtin.unarchive:
+    src: '{{ led_service2_release_local.path }}/{{ led_service2_release_archive }}'
+    dest: '{{ led_service2_release_remote.path }}'
+    owner: root
+    group: root
+
+- name: Check staged binary before installation
+  ansible.builtin.command:
+    argv: ['{{ led_service2_release_remote.path }}/led-server', '--version']
+  changed_when: false
+  register: led_service2_release_staged_version
+  failed_when: >-
+    led_service2_release_staged_version.rc != 0 or
+    led_service2_release_staged_version.stdout != 'led-server ' ~ led_service2_release_version[1:]
+
+- name: Read staged release metadata
+  ansible.builtin.slurp:
+    src: '{{ led_service2_release_remote.path }}/build-info.json'
+  register: led_service2_release_metadata
+
+- name: Check version and architecture metadata
+  ansible.builtin.assert:
+    that:
+      - (led_service2_release_metadata.content | b64decode | from_json).version == led_service2_release_version
+      - (led_service2_release_metadata.content | b64decode | from_json).target == 'aarch64-unknown-linux-gnu'
+
+- name: Inspect destination
+  ansible.builtin.stat:
+    path: '{{ led_service2_release_directory }}'
+    follow: false
+  register: led_service2_release_existing
+
+- name: Reject destination symlink or file
+  ansible.builtin.assert:
+    that:
+      - not led_service2_release_existing.stat.exists or led_service2_release_existing.stat.isdir | default(false)
+      - not led_service2_release_existing.stat.islnk | default(false)
+
+- name: Compare existing release without overwriting it
+  ansible.builtin.command:
+    argv: [diff, --no-dereference, --recursive, '{{ led_service2_release_directory }}', '{{ led_service2_release_remote.path }}']
+  changed_when: false
+  when: led_service2_release_existing.stat.exists
+
+- name: Set release directory permissions
+  ansible.builtin.file:
+    path: '{{ led_service2_release_remote.path }}'
+    mode: '0755'
+
+- name: Install new release atomically
+  ansible.builtin.command:
+    argv: [mv, -T, '{{ led_service2_release_remote.path }}', '{{ led_service2_release_directory }}']
+  changed_when: true
+  when: not led_service2_release_existing.stat.exists
