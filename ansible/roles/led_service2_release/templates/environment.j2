@@ -1,0 +1,4 @@
+# Initial configuration; subsequent deployments preserve this file.
+{% for key, value in led_service2_release_environment | dictsort %}
+{{ key }}="{{ value | string | replace('\\', '\\\\') | replace('"', '\\"') }}"
+{% endfor %}

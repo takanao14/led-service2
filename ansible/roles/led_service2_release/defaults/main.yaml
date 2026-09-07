@@ -7,3 +7,15 @@ led_service2_release_service: led-server.service
 led_service2_release_dropin: /etc/systemd/system/led-server.service.d/90-release.conf
 led_service2_release_directory: "{{ led_service2_release_base }}/releases/{{ led_service2_release_version }}"
 led_service2_release_archive: "led-service2_{{ led_service2_release_version }}_linux_arm64.tar.gz"
+# Initial installation only; existing service configuration is preserved on updates.
+led_service2_release_unit_path: '/etc/systemd/system/{{ led_service2_release_service }}'
+led_service2_release_environment_file: /etc/led-service2/environment
+led_service2_release_environment:
+  GRPC_ADDR: '0.0.0.0:50051'
+  PANEL_ROWS: '32'
+  PANEL_COLS: '64'
+  PANEL_BRIGHTNESS: '80'
+  PANEL_REFRESH_RATE: '60'
+  PANEL_SLOWDOWN: '2'
+  RUST_LOG: info
+  LOG_FORMAT: json

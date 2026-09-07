@@ -1,0 +1,156 @@
+---
+- name: Test first installation with a fake service manager
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    led_service2_release_version: v0.1.0
+    led_service2_release_service: led-release-fixture.service
+    led_service2_release_base: '{{ fixture_root.path }}'
+    led_service2_release_unit_path: '{{ fixture_root.path }}/led-release-fixture.service'
+    led_service2_release_environment_file: '{{ fixture_root.path }}/environment'
+    led_service2_release_environment:
+      PANEL_ROWS: '32'
+      TEST_VALUE: 'space "quote" and \backslash'
+    fixture_expected_environment: |
+      TEST_VALUE="space \"quote\" and \\backslash"
+  tasks:
+    - name: Require isolated Linux root test execution
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.system == 'Linux'
+          - ansible_facts.user_id == 'root'
+
+    - name: Create test directory
+      ansible.builtin.tempfile:
+        state: directory
+      register: fixture_root
+
+    - name: Test installation and failure cleanup
+      environment:
+        PATH: '{{ fixture_root.path }}/bin:{{ ansible_env.PATH }}'
+        LED_TEST_BASE: '{{ fixture_root.path }}'
+      block:
+        - name: Create fixture directories
+          ansible.builtin.file:
+            path: '{{ fixture_root.path }}/{{ item }}'
+            state: directory
+            mode: '0755'
+          loop: [bin, releases/v0.1.0]
+
+        - name: Install fake systemctl
+          ansible.builtin.copy:
+            src: fixtures/systemctl
+            dest: '{{ fixture_root.path }}/bin/systemctl'
+            mode: '0755'
+
+        - name: Create fake executable with service probe
+          ansible.builtin.copy:
+            dest: '{{ fixture_root.path }}/releases/v0.1.0/led-server'
+            mode: '0755'
+            content: |
+              #!/bin/sh
+              set -eu
+              if [ "$1" = --version ]; then echo 'led-server 0.1.0'; exit 0; fi
+              test "$1" = --check
+              test -f "$LED_TEST_BASE/active"
+
+        - name: Force first startup failure
+          ansible.builtin.copy:
+            content: fail
+            dest: '{{ fixture_root.path }}/fail-start'
+            mode: '0644'
+
+        - name: Expect first startup to fail
+          block:
+            - name: Attempt initial installation
+              ansible.builtin.include_role:
+                name: led_service2_release
+                tasks_from: install
+          rescue:
+            - name: Record expected startup failure
+              ansible.builtin.set_fact:
+                fixture_start_rejected: true
+
+        - name: Inspect failed installation cleanup
+          ansible.builtin.stat:
+            path: '{{ fixture_root.path }}/{{ item }}'
+          loop: [led-release-fixture.service, current, environment, enabled, active]
+          register: fixture_cleanup
+
+        - name: Require failed startup and complete cleanup
+          ansible.builtin.assert:
+            that:
+              - fixture_start_rejected | default(false)
+              - fixture_cleanup.results | selectattr('stat.exists') | list | length == 0
+
+        - name: Allow retry to start successfully
+          ansible.builtin.file:
+            path: '{{ fixture_root.path }}/fail-start'
+            state: absent
+
+        - name: Retry initial installation
+          ansible.builtin.include_role:
+            name: led_service2_release
+            tasks_from: install
+
+        - name: Inspect successful installation
+          ansible.builtin.stat:
+            path: '{{ fixture_root.path }}/{{ item }}'
+          loop: [led-release-fixture.service, current, environment, enabled, active]
+          register: fixture_success
+
+        - name: Require installed and running service
+          ansible.builtin.assert:
+            that:
+              - fixture_success.results | rejectattr('stat.exists') | list | length == 0
+
+        - name: Read generated environment
+          ansible.builtin.slurp:
+            src: '{{ fixture_root.path }}/environment'
+          register: fixture_environment
+
+        - name: Check environment escaping
+          ansible.builtin.assert:
+            that:
+              - "'PANEL_ROWS=\"32\"' in fixture_environment.content | b64decode"
+              - fixture_expected_environment in fixture_environment.content | b64decode
+
+        - name: Reset service files while preserving configuration
+          ansible.builtin.file:
+            path: '{{ fixture_root.path }}/{{ item }}'
+            state: absent
+          loop: [led-release-fixture.service, current, enabled, active]
+
+        - name: Force startup failure with preexisting configuration
+          ansible.builtin.copy:
+            content: fail
+            dest: '{{ fixture_root.path }}/fail-start'
+            mode: '0644'
+
+        - name: Expect failure with preserved configuration
+          block:
+            - name: Attempt installation using existing configuration
+              ansible.builtin.include_role:
+                name: led_service2_release
+                tasks_from: install
+          rescue:
+            - name: Record expected second startup failure
+              ansible.builtin.set_fact:
+                fixture_second_rejected: true
+
+        - name: Read preserved configuration
+          ansible.builtin.slurp:
+            src: '{{ fixture_root.path }}/environment'
+          register: fixture_preserved
+
+        - name: Verify preexisting configuration was retained
+          ansible.builtin.assert:
+            that:
+              - fixture_second_rejected | default(false)
+              - fixture_preserved.content == fixture_environment.content
+      always:
+        - name: Remove isolated test directory
+          ansible.builtin.file:
+            path: '{{ fixture_root.path }}'
+            state: absent

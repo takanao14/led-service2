@@ -11,20 +11,23 @@ ansible/
 ├── playbooks/ops-led_service2_release.yaml
 ├── roles/led_service2_release/
 │   ├── defaults/main.yaml
+│   ├── templates/               # Initial unit and environment configuration
 │   └── tasks/
 │       ├── main.yaml
+│       ├── validate_state.yaml
+│       ├── install.yaml
 │       ├── stage.yaml
 │       ├── verify_archive.yaml
 │       ├── migrate.yaml
 │       ├── activate.yaml
 │       └── probe.yaml
-└── tests/archive.yaml
+└── tests/                      # Archive, state selection and installation tests
 ```
 
 The inventory owns device membership. The operational playbook selects hosts,
 privilege escalation and serial execution. The single role owns release
-defaults and deployment tasks. Add host/group variables or templates only when
-needed; no external collections are required.
+defaults, deployment tasks and initial configuration templates. Add host/group
+variables when needed; no external collections are required.
 
 ## Running
 
@@ -35,6 +38,12 @@ make migrate-release VERSION=v0.1.0 RPI_HOST=rpi3
 make deploy-release VERSION=v0.1.1 RPI_HOST=rpi3
 make rollback VERSION=v0.1.0 RPI_HOST=rpi3
 ```
+
+Use `deploy-release` for both a new installation and an existing release-based
+service. Use `migrate-release` only when preserving an existing source-based
+systemd service. Fresh installs create a unit and environment file; updates
+preserve configuration. See [first installation](../RELEASE.md#first-installation)
+for initial settings and failure cleanup.
 
 Make explicitly selects this directory's `ansible.cfg`. To run Ansible directly,
 change to this directory so the same config, inventory and role paths are used:
@@ -61,9 +70,15 @@ From this directory:
 ansible-playbook playbooks/ops-led_service2_release.yaml --syntax-check
 ansible-lint .
 ansible-playbook -i localhost, tests/archive.yaml
+ansible-playbook -i localhost, tests/state.yaml
 ```
 
 The archive test invokes only the role's verification tasks on local temporary
 files. It does not connect to the device or restart services. Its two expected
 failures (bad checksum and a symlink in the archive) are rescued; the final recap
 must report `failed=0`.
+
+`tests/install.yaml` additionally tests first startup, failure cleanup, retry and
+preservation of existing configuration. Run it as root in an isolated Linux
+environment (or with `-e ansible_become=true` on the CI runner). It uses a fake
+`systemctl` and temporary unit files, never the real service manager or hardware.

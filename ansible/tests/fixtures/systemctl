@@ -1,0 +1,31 @@
+#!/bin/sh
+# Local test double: never invoke the host's service manager.
+set -eu
+: "${LED_TEST_BASE:?}"
+case "$1" in
+    daemon-reload) exit 0 ;;
+    show)
+        if [ -f "$LED_TEST_BASE/led-release-fixture.service" ]; then
+            echo 'LoadState=loaded'
+        else
+            echo 'LoadState=not-found'
+        fi
+        if [ -f "$LED_TEST_BASE/active" ]; then
+            echo 'ActiveState=active'
+        else
+            echo 'ActiveState=inactive'
+        fi
+        ;;
+    is-enabled)
+        if [ -f "$LED_TEST_BASE/enabled" ]; then echo enabled; else echo disabled; exit 1; fi
+        ;;
+    enable) touch "$LED_TEST_BASE/enabled" ;;
+    disable) rm -f "$LED_TEST_BASE/enabled" ;;
+    start|restart)
+        if [ -f "$LED_TEST_BASE/fail-start" ]; then exit 1; fi
+        touch "$LED_TEST_BASE/active"
+        ;;
+    stop) rm -f "$LED_TEST_BASE/active" ;;
+    is-active) test -f "$LED_TEST_BASE/active" ;;
+    *) echo "Unexpected fixture systemctl command: $*" >&2; exit 2 ;;
+esac

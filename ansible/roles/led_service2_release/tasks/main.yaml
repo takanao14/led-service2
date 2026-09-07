@@ -39,6 +39,12 @@
         follow: false
       register: led_service2_release_current
 
+    - name: Read existing service registration state
+      ansible.builtin.command:
+        argv: [systemctl, show, '{{ led_service2_release_service }}', '--property=LoadState', '--value']
+      changed_when: false
+      register: led_service2_release_load_state
+
     - name: Read existing service command
       ansible.builtin.command:
         argv: [systemctl, show, '{{ led_service2_release_service }}', '--property=ExecStart', '--value']
@@ -50,14 +56,8 @@
         path: "{{ led_service2_release_dropin }}"
       register: led_service2_release_override
 
-    - name: Validate service migration state
-      ansible.builtin.assert:
-        that:
-          - >-
-            (led_service2_release_action == 'migrate' and not led_service2_release_current.stat.exists and not led_service2_release_override.stat.exists)
-            or (led_service2_release_action != 'migrate' and led_service2_release_current.stat.islnk | default(false)
-            and ('path=' ~ led_service2_release_base ~ '/current/led-server ;') in led_service2_release_exec.stdout)
-        fail_msg: Use migrate for an existing source installation, deploy or rollback after migration.
+    - name: Select installation or update mode
+      ansible.builtin.include_tasks: validate_state.yaml
 
     - name: Fetch and stage release
       ansible.builtin.include_tasks: stage.yaml
@@ -88,14 +88,20 @@
       ansible.builtin.include_tasks: migrate.yaml
       when: led_service2_release_action == 'migrate'
 
+    - name: Install a new service
+      ansible.builtin.include_tasks: install.yaml
+      when: led_service2_release_fresh_install
+
     - name: Remember previous release
       ansible.builtin.set_fact:
         led_service2_release_previous: >-
           {{ led_service2_release_legacy_directory if led_service2_release_action == 'migrate'
              else led_service2_release_current.stat.lnk_source }}
+      when: not led_service2_release_fresh_install
 
     - name: Activate requested release
       ansible.builtin.include_tasks: activate.yaml
+      when: not led_service2_release_fresh_install
 
   always:
     - name: Remove controller staging directory

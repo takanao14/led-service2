@@ -1,0 +1,15 @@
+[Unit]
+Description=LED Panel Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory={{ led_service2_release_base }}
+EnvironmentFile={{ led_service2_release_environment_file }}
+ExecStart={{ led_service2_release_base }}/current/led-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

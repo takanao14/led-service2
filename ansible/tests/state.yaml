@@ -1,0 +1,20 @@
+---
+- name: Test installation state selection without a device
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Check fresh, existing, legacy and invalid states
+      ansible.builtin.include_tasks: state_case.yaml
+      loop:
+        - {action: deploy, load: not-found, link: false, reject: false, fresh: true}
+        - {action: deploy, load: loaded, link: true, reject: false, fresh: false}
+        - {action: rollback, load: loaded, link: true, reject: false, fresh: false}
+        - {action: migrate, load: loaded, link: false, reject: false, fresh: false}
+        - {action: deploy, load: loaded, link: false, reject: true, fresh: false}
+        - {action: migrate, load: not-found, link: false, reject: true, fresh: false}
+        - {action: rollback, load: not-found, link: false, reject: true, fresh: false}
+        - {action: deploy, load: not-found, link: true, reject: true, fresh: false}
+        - {action: deploy, load: masked, link: true, reject: true, fresh: false}
+      loop_control:
+        loop_var: fixture_case

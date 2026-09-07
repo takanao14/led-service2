@@ -1,0 +1,34 @@
+---
+- name: Reset state case result
+  ansible.builtin.set_fact:
+    fixture_state_rejected: false
+
+- name: Validate fixture service state
+  vars:
+    led_service2_release_action: '{{ fixture_case.action }}'
+    led_service2_release_load_state:
+      stdout: '{{ fixture_case.load }}'
+    led_service2_release_current:
+      stat:
+        exists: '{{ fixture_case.link }}'
+        islnk: '{{ fixture_case.link }}'
+    led_service2_release_override:
+      stat:
+        exists: false
+    led_service2_release_exec:
+      stdout: "{{ '{ path=/opt/led-service2/current/led-server ; }' if fixture_case.link else '{ path=/old/led-server ; }' }}"
+  block:
+    - name: Select fixture installation mode
+      ansible.builtin.include_role:
+        name: led_service2_release
+        tasks_from: validate_state
+  rescue:
+    - name: Record rejected state
+      ansible.builtin.set_fact:
+        fixture_state_rejected: true
+
+- name: Verify fixture state outcome
+  ansible.builtin.assert:
+    that:
+      - fixture_state_rejected == fixture_case.reject
+      - fixture_state_rejected or led_service2_release_fresh_install == fixture_case.fresh

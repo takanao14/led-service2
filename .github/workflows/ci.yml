@@ -39,6 +39,8 @@ jobs:
         run: |
           pipx run ansible-lint ansible/
           pipx run --spec ansible-core ansible-playbook -i localhost, ansible/tests/archive.yaml
+          pipx run --spec ansible-core ansible-playbook -i localhost, ansible/tests/state.yaml
+          pipx run --spec ansible-core ansible-playbook -i localhost, ansible/tests/install.yaml -e ansible_become=true
 
   emulator:
     name: Lint and test (emulator)

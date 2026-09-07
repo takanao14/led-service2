@@ -31,11 +31,44 @@ libraries. Archive metadata is normalized; bit-identical binary builds are not
 guaranteed. Source archive generation uses tracked files, so commit new source
 files before packaging locally.
 
-## Initial migration
+## First installation
+
+If `led-server.service` is not registered, use `deploy`:
+
+```sh
+make deploy-release VERSION=v0.1.0 RPI_HOST=rpi3
+```
+
+After verifying the binary, Ansible creates `/etc/led-service2/environment`,
+`/etc/systemd/system/led-server.service`, and the `current` link, then enables
+and starts the service. The unit runs as root for hardware access and uses
+`/opt/led-service2` as its working directory. It does not require a source
+checkout or a permissive audio udev rule. Install the runtime dependencies
+listed above before deployment.
+
+Initial settings use a 32-row, 64-column panel and listen on `0.0.0.0:50051`.
+The optional eye-catch and jingle are disabled until configured. No media files
+are uploaded. Configure the initial environment with the role variable
+`led_service2_release_environment`, or edit `/etc/led-service2/environment`
+and restart the service. Add `EYECATCH_PATH` and `JINGLE_PATH` only after placing
+the corresponding files on the device. Existing environment files are preserved,
+including on subsequent updates; changing role defaults does not rewrite them.
+
+If first startup fails, Ansible stops and disables the new service and removes
+the new unit, current link, and environment file (only if created in that run).
+Existing configuration, assets and downloaded releases remain available. Fix
+the cause and retry `deploy`. If stopping the service itself fails, cleanup
+stops too so that files still used by a running service are not deleted.
+
+`migrate` and `rollback` require a registered service. A legacy source-based
+service still requires the explicit migration described below. Incomplete
+installations with an orphan current link or drop-in are rejected for inspection.
+
+## Initial migration from a source installation
 
 The existing `led-server.service` must already be installed and working. Keep
-its assets and configuration in place. This is not a fresh-device provisioning
-command. The playbook requires a single ExecStart executable without arguments.
+its assets and configuration in place. Migration requires a single ExecStart
+executable without arguments; use `deploy` when the service is not registered.
 
 On the development machine, install Ansible and GitHub CLI (`gh`), authenticate
 with access to the release repository, and configure SSH access to `rpi3`.

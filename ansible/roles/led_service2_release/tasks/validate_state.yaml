@@ -1,0 +1,27 @@
+---
+- name: Identify first installation
+  ansible.builtin.set_fact:
+    led_service2_release_fresh_install: >-
+      {{ led_service2_release_action == 'deploy' and led_service2_release_load_state.stdout == 'not-found' }}
+
+- name: Validate service installation state
+  ansible.builtin.assert:
+    that:
+      - >-
+        (led_service2_release_fresh_install
+         and not led_service2_release_current.stat.exists
+         and not led_service2_release_override.stat.exists)
+        or (led_service2_release_load_state.stdout == 'loaded' and (
+          (led_service2_release_action == 'migrate'
+           and not led_service2_release_current.stat.exists
+           and not led_service2_release_override.stat.exists)
+          or (led_service2_release_action != 'migrate'
+              and led_service2_release_current.stat.islnk | default(false)
+              and ('path=' ~ led_service2_release_base ~ '/current/led-server ;') in led_service2_release_exec.stdout)))
+    fail_msg: >-
+      Invalid state for {{ led_service2_release_action }}:
+      {{ led_service2_release_service }} LoadState={{ led_service2_release_load_state.stdout }}.
+      Use deploy for a new installation or an existing release installation,
+      migrate for an existing source installation, and rollback only after installation.
+      If current or a migration override exists without a loaded service, inspect
+      the incomplete installation before retrying.

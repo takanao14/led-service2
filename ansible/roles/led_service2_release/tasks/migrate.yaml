@@ -10,6 +10,10 @@
       - led_service2_release_original_binary | length > 0
       - "('argv[]=' ~ led_service2_release_original_binary ~ ' ;') in led_service2_release_exec.stdout"
       - led_service2_release_exec.stdout | regex_findall('path=') | length == 1
+    fail_msg: >-
+      Cannot migrate {{ led_service2_release_service }}: expected exactly one
+      ExecStart executable without arguments. Inspect its ExecStart with
+      systemctl show {{ led_service2_release_service }} --property=ExecStart.
 
 - name: Create legacy backup directory
   ansible.builtin.file:

@@ -1,0 +1,118 @@
+---
+- name: Inspect initial unit file
+  ansible.builtin.stat:
+    path: '{{ led_service2_release_unit_path }}'
+    follow: false
+  register: led_service2_release_initial_unit
+
+- name: Require an unused unit path
+  ansible.builtin.assert:
+    that:
+      - not led_service2_release_initial_unit.stat.exists
+    fail_msg: A unit file exists but is not loaded. Inspect it and reload systemd before retrying.
+
+- name: Inspect existing environment configuration
+  ansible.builtin.stat:
+    path: '{{ led_service2_release_environment_file }}'
+    follow: false
+  register: led_service2_release_initial_environment
+
+- name: Require regular environment configuration if present
+  ansible.builtin.assert:
+    that:
+      - not led_service2_release_initial_environment.stat.exists or led_service2_release_initial_environment.stat.isreg | default(false)
+      - not led_service2_release_initial_environment.stat.islnk | default(false)
+
+- name: Validate initial environment values
+  ansible.builtin.assert:
+    that:
+      - item.key is match('^[A-Z_][A-Z0-9_]*$')
+      - "'\n' not in item.value | string"
+      - "'\r' not in item.value | string"
+    fail_msg: Environment entries must have uppercase variable names and single-line values.
+  loop: '{{ led_service2_release_environment | dict2items }}'
+  loop_control:
+    label: '{{ item.key }}'
+  when: not led_service2_release_initial_environment.stat.exists
+
+- name: Ensure initial configuration and assets directories exist
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - '{{ led_service2_release_unit_path | dirname }}'
+    - '{{ led_service2_release_environment_file | dirname }}'
+    - '{{ led_service2_release_base }}/assets'
+
+- name: Configure and start new service
+  block:
+    - name: Create initial environment configuration
+      ansible.builtin.template:
+        src: environment.j2
+        dest: '{{ led_service2_release_environment_file }}'
+        owner: root
+        group: root
+        mode: '0644'
+        force: false
+
+    - name: Set initial release link
+      ansible.builtin.file:
+        path: '{{ led_service2_release_base }}/current'
+        src: '{{ led_service2_release_directory }}'
+        state: link
+
+    - name: Install systemd unit
+      ansible.builtin.template:
+        src: led-server.service.j2
+        dest: '{{ led_service2_release_unit_path }}'
+        owner: root
+        group: root
+        mode: '0644'
+      register: led_service2_release_unit_created
+
+    - name: Enable and start new service
+      ansible.builtin.systemd_service:
+        name: '{{ led_service2_release_service }}'
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Verify first startup
+      ansible.builtin.include_tasks: probe.yaml
+
+  rescue:
+    - name: Stop and disable unsuccessful installation before removing files
+      ansible.builtin.systemd_service:
+        name: '{{ led_service2_release_service }}'
+        daemon_reload: true
+        enabled: false
+        state: stopped
+      when: led_service2_release_unit_created is defined and led_service2_release_unit_created is changed
+
+    - name: Remove newly created unit and release link
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: absent
+      loop:
+        - '{{ led_service2_release_unit_path }}'
+        - '{{ led_service2_release_base }}/current'
+
+    - name: Remove newly created environment configuration
+      ansible.builtin.file:
+        path: '{{ led_service2_release_environment_file }}'
+        state: absent
+      when: not led_service2_release_initial_environment.stat.exists
+
+    - name: Reload systemd after unsuccessful installation
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Report failed initial installation
+      ansible.builtin.fail:
+        msg: >-
+          Initial startup failed. The new service unit and current link have been removed;
+          existing configuration, assets and downloaded releases are preserved. Inspect
+          the failed task and journalctl before retrying deploy.
