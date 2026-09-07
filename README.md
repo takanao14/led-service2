@@ -70,6 +70,10 @@ make deploy
 
 ## Running
 
+Use `led-server --version` to inspect the package
+version, or `led-server --check http://127.0.0.1:50051` to probe a running service
+without displaying an image. Startup logs include the version and build revision.
+
 ### macOS (emulator)
 
 ```bash

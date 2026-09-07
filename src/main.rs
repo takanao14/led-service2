@@ -10,10 +10,43 @@ mod worker;
 pub use led_service2::proto;
 
 use anyhow::Context;
+use clap::Parser;
 use proto::image_service_server::ImageServiceServer;
 use service::LedImageService;
 use tonic::transport::Server;
 use worker::DisplayRequest;
+
+#[derive(Parser)]
+#[command(name = "led-server", version, about = "LED image display service")]
+struct Args {
+    /// Check the gRPC service without displaying an image, then exit.
+    #[arg(long, value_name = "URL")]
+    check: Option<String>,
+}
+
+fn check_service(url: String) -> anyhow::Result<()> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                let mut client =
+                    proto::image_service_client::ImageServiceClient::connect(url).await?;
+                // Missing images are rejected before queueing or display processing.
+                match client.send_image(proto::SendImageRequest::default()).await {
+                    Err(status)
+                        if status.code() == tonic::Code::InvalidArgument
+                            && status.message() == "image is required" =>
+                    {
+                        Ok(())
+                    }
+                    other => anyhow::bail!("unexpected service probe response: {other:?}"),
+                }
+            })
+            .await
+            .context("gRPC probe timed out")?
+        })
+}
 
 /// Entry point.
 ///
@@ -26,6 +59,10 @@ use worker::DisplayRequest;
 /// Set `RUST_LOG` to control log level (e.g. `RUST_LOG=debug`).
 /// Set `LOG_FORMAT=json` to switch to structured JSON output (recommended for production).
 fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+    if let Some(url) = args.check {
+        return check_service(url);
+    }
     let env_filter = tracing_subscriber::EnvFilter::from_default_env()
         .add_directive("led_service2=info".parse()?);
 
@@ -40,6 +77,8 @@ fn main() -> anyhow::Result<()> {
 
     let cfg = config::Config::from_env()?;
     tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        git_revision = env!("LED_BUILD_REVISION"),
         grpc_addr = %cfg.grpc_addr,
         worker_timeout = ?cfg.worker_timeout,
         "starting led-service2"

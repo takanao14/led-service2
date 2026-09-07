@@ -94,6 +94,16 @@ fn sigterm_stops_idle_server_with_open_connection() {
         assert!(Instant::now() < startup_deadline, "server did not start");
         std::thread::sleep(Duration::from_millis(20));
     };
+    let probe = Command::new(env!("CARGO_BIN_EXE_led-server"))
+        .args(["--check", &format!("http://{addr}")])
+        .env("PANEL_ROWS", "invalid")
+        .output()
+        .expect("probe running server");
+    assert!(
+        probe.status.success(),
+        "gRPC probe failed: {}",
+        String::from_utf8_lossy(&probe.stderr)
+    );
     // Give serve_with_shutdown time to install its signal handlers.
     std::thread::sleep(Duration::from_millis(100));
     assert!(Command::new("/bin/kill")
