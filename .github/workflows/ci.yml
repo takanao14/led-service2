@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -77,10 +80,16 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential protobuf-compiler libasound2-dev
+          sudo apt-get install -y build-essential pkg-config protobuf-compiler libasound2-dev
 
       - name: Clippy
         run: cargo clippy --locked --all-targets --no-default-features --features rpi -- -D warnings
 
       - name: Build
         run: cargo build --locked --bin led-server --no-default-features --features rpi
+
+      - name: Test
+        run: cargo test --locked --no-default-features --features rpi
+
+  package:
+    uses: ./.github/workflows/build-rpi.yml

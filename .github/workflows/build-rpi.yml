@@ -1,19 +1,26 @@
 name: Build RPi Binary
 
 on:
-  push:
-    branches:
-      - main
+  workflow_call:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-24.04-arm
+    container: debian:trixie
 
     steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates curl git build-essential pkg-config libasound2-dev protobuf-compiler jq
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          submodules: true
+          submodules: recursive
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -21,15 +28,51 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev build-essential protobuf-compiler
-
       - name: Build
+        env:
+          LED_BUILD_REVISION: ${{ github.sha }}
         run: cargo build --locked --release --bin led-server --features rpi --no-default-features
+
+      - name: Package and verify
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/led-image-api"
+          PACKAGE_VERSION=$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "led-service2") | .version')
+          test "$(target/release/led-server --version)" = "led-server $PACKAGE_VERSION"
+          mkdir -p dist
+          STAGING=$(mktemp -d)
+          trap 'rm -rf "$STAGING"' EXIT
+          mkdir -p "$STAGING/binary" "$STAGING/source/.cargo"
+          cp target/release/led-server LICENSE RELEASE.md "$STAGING/binary/"
+          ldd target/release/led-server > "$STAGING/dependencies.txt"
+          if grep -q 'not found' "$STAGING/dependencies.txt"; then exit 1; fi
+          jq -n --arg version "v$PACKAGE_VERSION" --arg commit "$GITHUB_SHA" \
+            --arg api_commit "$(git -C led-image-api rev-parse HEAD)" \
+            --arg rustc "$(rustc --version)" --rawfile dependencies "$STAGING/dependencies.txt" \
+            '{version: $version, commit: $commit, api_commit: $api_commit, rustc: $rustc,
+              target: "aarch64-unknown-linux-gnu", os: "Debian 13 (trixie)", dependencies: $dependencies}' \
+            > "$STAGING/binary/build-info.json"
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -C "$STAGING/binary" -cf - LICENSE RELEASE.md build-info.json led-server \
+            | gzip -n > "dist/led-service2_v${PACKAGE_VERSION}_linux_arm64.tar.gz"
+          # Include tracked API sources and dependency sources/licenses for redistribution.
+          git ls-files --recurse-submodules -z | tar --null -T - -cf - | tar -C "$STAGING/source" -xf -
+          cargo vendor --locked "$STAGING/source/vendor" > "$STAGING/source/.cargo/config.toml"
+          sed -i "s|$STAGING/source/vendor|vendor|g" "$STAGING/source/.cargo/config.toml"
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -C "$STAGING/source" -cf - . | gzip -n > "dist/led-service2_v${PACKAGE_VERSION}_source.tar.gz"
+          mkdir "$STAGING/verify"
+          tar -xzf "dist/led-service2_v${PACKAGE_VERSION}_linux_arm64.tar.gz" -C "$STAGING/verify"
+          test "$(find "$STAGING/verify" -type f -printf '%f\n' | sort)" = $'LICENSE\nRELEASE.md\nbuild-info.json\nled-server'
+          test "$("$STAGING/verify/led-server" --version)" = "led-server $PACKAGE_VERSION"
+          cd dist
+          sha256sum ./*.tar.gz > checksums.txt
+          sha256sum --check checksums.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: led-server-aarch64-${{ github.sha }}
-          path: target/release/led-server
+          name: led-release-${{ github.sha }}
+          path: dist/
           retention-days: 30
