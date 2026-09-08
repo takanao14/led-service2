@@ -22,6 +22,7 @@
 - Documentation-only changes require path, command, and consistency checks; Rust builds are not required.
 
 ## Deployment and Operations
+- The `led_service2_monitor` Ansible role publishes periodic availability checks to the Homelab-managed node_exporter textfile directory. Do not change shared directory ownership; monitoring never sends display requests.
 - `make deploy` runs `deploy.sh`, which uses rsync with `--delete` and builds remotely. Check the destination and deletion scope, and exclude local secrets from syncs.
 - `sudo make install` copies assets, writes a systemd unit and an audio udev rule, and enables/starts the service. Build the binary and prepare required assets first.
 - Do not deploy, install/restart services, or execute on hardware merely to validate source or documentation changes.

@@ -1,0 +1,7 @@
+---
+- name: Monitor LED service without displaying images
+  hosts: led_devices
+  become: true
+  serial: 1
+  roles:
+    - role: led_service2_monitor

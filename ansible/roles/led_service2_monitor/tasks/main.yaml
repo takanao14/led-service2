@@ -1,0 +1,66 @@
+---
+- name: Inspect shared textfile directory
+  ansible.builtin.stat:
+    path: '{{ led_service2_monitor_textfile_dir }}'
+  register: led_service2_monitor_directory
+
+- name: Require Homelab textfile setup
+  ansible.builtin.assert:
+    that:
+      - led_service2_monitor_directory.stat.isdir | default(false)
+      - led_service2_monitor_directory.stat.gr_name | default('') == led_service2_monitor_textfile_group
+      - led_service2_monitor_directory.stat.wgrp | default(false)
+    fail_msg: Apply Homelab node_exporter configuration before installing this monitor.
+
+- name: Create restricted metrics writer
+  ansible.builtin.user:
+    name: led-monitor
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    groups: '{{ led_service2_monitor_textfile_group }}'
+    append: true
+
+- name: Ensure collector directory exists
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install metrics collector
+  ansible.builtin.copy:
+    src: led-service-check.py
+    dest: /usr/local/libexec/led-service-check.py
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install check service
+  ansible.builtin.template:
+    src: led-service-check.service.j2
+    dest: /etc/systemd/system/led-service-check.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload monitor units
+
+- name: Install check timer
+  ansible.builtin.copy:
+    src: led-service-check.timer
+    dest: /etc/systemd/system/led-service-check.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload monitor units
+
+- name: Flush monitor unit changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable periodic checks
+  ansible.builtin.systemd_service:
+    name: led-service-check.timer
+    enabled: true
+    state: started
+  when: not ansible_check_mode

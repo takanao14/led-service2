@@ -2,3 +2,5 @@ target
 dist
 .idea
 assets
+
+__pycache__/

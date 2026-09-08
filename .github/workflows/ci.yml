@@ -37,6 +37,7 @@ jobs:
         env:
           ANSIBLE_CONFIG: ${{ github.workspace }}/ansible/ansible.cfg
         run: |
+          python3 -m unittest discover -s ansible/tests -p 'test_*.py'
           pipx run ansible-lint ansible/
           pipx run --spec ansible-core ansible-playbook -i localhost, ansible/tests/archive.yaml
           pipx run --spec ansible-core ansible-playbook -i localhost, ansible/tests/state.yaml

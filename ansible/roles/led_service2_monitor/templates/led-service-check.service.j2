@@ -1,0 +1,15 @@
+[Unit]
+Description=Collect LED service availability metrics
+After=network.target
+
+[Service]
+Type=oneshot
+User=led-monitor
+SupplementaryGroups={{ led_service2_monitor_textfile_group }}
+ExecStart=/usr/bin/python3 /usr/local/libexec/led-service-check.py --binary {{ led_service2_monitor_binary }} --url {{ led_service2_monitor_url }} --service {{ led_service2_monitor_service }} --output {{ led_service2_monitor_textfile_dir }}/led_service.prom
+TimeoutStartSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths={{ led_service2_monitor_textfile_dir }}

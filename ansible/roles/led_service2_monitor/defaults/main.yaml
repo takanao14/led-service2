@@ -1,0 +1,7 @@
+---
+led_service2_monitor_binary: /opt/led-service2/current/led-server
+led_service2_monitor_url: http://127.0.0.1:50051
+led_service2_monitor_service: led-server.service
+# Must match Homelab node_exporter; this role does not own the shared directory.
+led_service2_monitor_textfile_dir: /var/lib/prometheus/node-exporter
+led_service2_monitor_textfile_group: node-exporter-textfile
