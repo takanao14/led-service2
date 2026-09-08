@@ -65,7 +65,11 @@ fn prepare(
         cols
     };
     // Include both the image and the row-major RGB rendering buffer.
-    limits.check_render_bytes(u64::from(width) * u64::from(rows) * 6)?;
+    limits.check_render_buffers(
+        cols,
+        rows,
+        (u64::from(width) + u64::from(cols)) * u64::from(rows) * 3,
+    )?;
     let mut canvas = image::RgbImage::new(width, rows);
     let crop_x = scaled_w.saturating_sub(u64::from(width)) / 2;
     let crop_y = scaled_h.saturating_sub(u64::from(rows)) / 2;
@@ -162,7 +166,7 @@ pub fn show_animated(
         .and_then(|n| n.checked_mul(3))
         .and_then(|n| n.checked_mul(frames.len() as u64 + 1))
         .ok_or_else(|| anyhow::anyhow!("animation render size overflow"))?;
-    limits.check_render_bytes(bytes)?;
+    limits.check_render_buffers(cols as u32, rows as u32, bytes)?;
     let mut panels = Vec::with_capacity(frames.len());
     for frame in frames {
         let panel = prepare(display, &frame.image, Scale::Height, limits, work)?;
@@ -339,6 +343,43 @@ mod tests {
             .collect();
         assert!(show_animated(&mut display, &frames, &limits, &work).is_err());
         assert_eq!(state.borrow().renders, 0);
+    }
+
+    #[cfg(not(feature = "rpi"))]
+    #[test]
+    fn animation_budget_includes_emulator_screen_at_boundary() {
+        // 40 RGB frames plus one preparation canvas and the 10x emulator screen.
+        let total = 4 * 2 * (3 * 41 + 400);
+        for budget in [total - 1, total] {
+            let shutdown = Shutdown::new();
+            let work = Work {
+                shutdown: &shutdown,
+                deadline: Instant::now() + Duration::from_secs(1),
+            };
+            let state = Rc::new(RefCell::new(State {
+                cancel_on_render: Some(shutdown.clone()),
+                ..State::default()
+            }));
+            let mut display = FakeDisplay(state.clone());
+            let frames: Vec<_> = (0..40)
+                .map(|_| AnimFrame {
+                    image: DynamicImage::new_rgb8(4, 2),
+                    delay: Duration::from_millis(10),
+                })
+                .collect();
+            let limits = ImageLimits {
+                max_render_bytes: budget,
+                ..ImageLimits::default()
+            };
+            let err = show_animated(&mut display, &frames, &limits, &work).unwrap_err();
+            if budget < total {
+                assert!(err.to_string().contains("MAX_RENDER_BYTES"));
+                assert_eq!(state.borrow().renders, 0);
+            } else {
+                assert!(err.is::<crate::shutdown::Stopped>());
+                assert_eq!(state.borrow().renders, 1);
+            }
+        }
     }
 
     #[test]

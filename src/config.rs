@@ -191,9 +191,21 @@ impl ImageLimits {
 
     pub fn check_panel(&self, cols: u32, rows: u32) -> anyhow::Result<()> {
         self.check_dimensions(cols, rows)?;
+        self.check_render_buffers(cols, rows, u64::from(cols) * u64::from(rows) * 6)
+    }
+
+    /// Include the backend screen buffer alongside application-owned RGB buffers.
+    pub fn check_render_buffers(&self, cols: u32, rows: u32, rgb_bytes: u64) -> anyhow::Result<()> {
         // The emulator expands each panel pixel into 100 four-byte screen pixels.
-        let bytes_per_pixel = if cfg!(feature = "rpi") { 6 } else { 406 };
-        self.check_render_bytes(u64::from(cols) * u64::from(rows) * bytes_per_pixel)
+        let screen_bytes = if cfg!(feature = "rpi") {
+            0
+        } else {
+            u64::from(cols) * u64::from(rows) * 400
+        };
+        let total = rgb_bytes
+            .checked_add(screen_bytes)
+            .ok_or_else(|| anyhow::anyhow!("render size overflow"))?;
+        self.check_render_bytes(total)
     }
 
     pub fn check_render_bytes(&self, bytes: u64) -> anyhow::Result<()> {
