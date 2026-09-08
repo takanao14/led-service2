@@ -5,6 +5,8 @@ After=network.target
 [Service]
 Type=simple
 User=root
+# The LED library drops UID/GID to daemon but retains supplementary groups.
+SupplementaryGroups=audio
 WorkingDirectory={{ led_service2_release_base }}
 EnvironmentFile={{ led_service2_release_environment_file }}
 ExecStart={{ led_service2_release_base }}/current/led-server

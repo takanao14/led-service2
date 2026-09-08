@@ -105,6 +105,16 @@
             that:
               - fixture_success.results | rejectattr('stat.exists') | list | length == 0
 
+        - name: Read generated service unit
+          ansible.builtin.slurp:
+            src: '{{ fixture_root.path }}/led-release-fixture.service'
+          register: fixture_unit
+
+        - name: Require audio access after LED privilege drop
+          ansible.builtin.assert:
+            that:
+              - "'SupplementaryGroups=audio' in fixture_unit.content | b64decode"
+
         - name: Read generated environment
           ansible.builtin.slurp:
             src: '{{ fixture_root.path }}/environment'

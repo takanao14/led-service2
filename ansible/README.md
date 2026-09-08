@@ -82,3 +82,5 @@ must report `failed=0`.
 preservation of existing configuration. Run it as root in an isolated Linux
 environment (or with `-e ansible_become=true` on the CI runner). It uses a fake
 `systemctl` and temporary unit files, never the real service manager or hardware.
+
+New installations grant the service the `audio` supplementary group so WAV playback remains available after the LED library drops its UID/GID to `daemon`. Existing units are preserved; add `SupplementaryGroups=audio` in a systemd service override and restart when enabling audio on an installation created before this setting.
