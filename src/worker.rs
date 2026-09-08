@@ -133,7 +133,16 @@ fn process_request(
 
 fn load_eyecatch(path: &str, cfg: &Config, work: &Work<'_>) -> anyhow::Result<Vec<AnimFrame>> {
     use std::io::Read;
-    let mut file = std::fs::File::open(path)?;
+    work.check()?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Opening a FIFO must not block before we can inspect its file type.
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let mut file = options.open(path)?;
     anyhow::ensure!(
         file.metadata()?.is_file(),
         "eye-catch must be a regular file"
@@ -351,6 +360,69 @@ mod tests {
             duration: Duration::from_secs(30),
             display_mode: ProtoDisplayMode::Static,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn eyecatch_rejects_fifo_and_symlink_without_waiting_for_writer() {
+        use std::os::unix::fs::symlink;
+        let directory = std::env::temp_dir().join(format!(
+            "led-eyecatch-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let fifo = directory.join("fifo");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success());
+        let link = directory.join("link");
+        symlink(&fifo, &link).unwrap();
+        for path in [fifo, link] {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let handle = std::thread::spawn(move || {
+                let shutdown = Shutdown::new();
+                let work = Work {
+                    shutdown: &shutdown,
+                    deadline: Instant::now() + Duration::from_secs(1),
+                };
+                let error = load_eyecatch(path.to_str().unwrap(), &test_support::config(), &work)
+                    .err()
+                    .map(|e| e.to_string());
+                let _ = tx.send(error);
+            });
+            let result = rx.recv_timeout(Duration::from_secs(2));
+            if result.is_err() {
+                std::fs::remove_dir_all(&directory).unwrap();
+                panic!("FIFO open blocked without a writer");
+            }
+            assert!(result.unwrap().unwrap().contains("regular file"));
+            handle.join().unwrap();
+        }
+        // O_NONBLOCK must preserve regular GIF loading, including through symlinks.
+        let image = directory.join("image.gif");
+        std::fs::write(&image, test_support::gif(2, 2, 1)).unwrap();
+        let image_link = directory.join("image-link.gif");
+        symlink(&image, &image_link).unwrap();
+        let shutdown = Shutdown::new();
+        let work = Work {
+            shutdown: &shutdown,
+            deadline: Instant::now() + Duration::from_secs(1),
+        };
+        for path in [image, image_link] {
+            assert_eq!(
+                load_eyecatch(path.to_str().unwrap(), &test_support::config(), &work)
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

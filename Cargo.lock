@@ -927,6 +927,7 @@ dependencies = [
  "hound",
  "humantime",
  "image",
+ "libc",
  "minifb",
  "prost",
  "rodio",
