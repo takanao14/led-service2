@@ -30,8 +30,45 @@ led-server
 
 | Environment | Requirements |
 |-------------|-------------|
-| macOS (development) | Rust toolchain, `protoc` |
-| Raspberry Pi (production) | Rust toolchain, root privileges (LED panel control), `build-essential`, `pkg-config`, `libasound2-dev`, `protobuf-compiler` |
+| macOS (local development) | Rust toolchain, `protoc` |
+| macOS (deployment controller) | Ansible, GitHub CLI (`gh`) authenticated with access to the release repository, SSH access to the device |
+| Raspberry Pi (release deployment) | Debian 13 (trixie), ARM64, Python 3 for Ansible, sudo access, runtime libraries including `libasound2t64` |
+| Raspberry Pi (source build only) | Rust toolchain, `build-essential`, `pkg-config`, `libasound2-dev`, `protobuf-compiler` |
+
+## Deploying to Raspberry Pi
+
+Run deployment commands **on the macOS controller, from the repository root**.
+Ansible downloads and verifies a published GitHub Release locally, then transfers
+the binary to `rpi3` over SSH. The device does not need Rust, a compiler, or a
+source checkout for release deployment.
+
+For a new installation or an update of an existing release-based service:
+
+```sh
+# Replace v0.1.0 with the published release you want to install.
+make deploy-release VERSION=v0.1.0 RPI_HOST=rpi3
+```
+
+| Device state | Command |
+|--------------|---------|
+| No `led-server.service` registered | `make deploy-release VERSION=v0.1.0 RPI_HOST=rpi3` creates and starts the service |
+| Service already uses the release layout | The same `deploy-release` command updates it; configuration is preserved |
+| Existing service runs a binary from a source checkout | `make migrate-release VERSION=v0.1.0 RPI_HOST=rpi3` preserves its configuration and switches to the release layout |
+| Return to a previously installed tagged release | `make rollback VERSION=v0.1.0 RPI_HOST=rpi3` |
+
+Initial deployment creates `/etc/led-service2/environment` and a systemd unit
+running `/opt/led-service2/current/led-server`. Versioned binaries are retained
+under `/opt/led-service2/releases/`. The service is enabled at boot. An already
+active version is checked without restarting it.
+
+The default inventory is `ansible/inventories/homelab/hosts.yaml`. Use
+`ANSIBLE_INVENTORY` for another inventory and `ANSIBLE_ARGS=--ask-become-pass`
+when sudo requires a password. Direct playbook commands are documented in
+[ansible/README.md](ansible/README.md).
+
+See [RELEASE.md](RELEASE.md) for tag publication, runtime requirements,
+initial installation, migration and failure recovery. Publishing a tag does
+not deploy to the device.
 
 ## Build
 
@@ -52,7 +89,7 @@ make build
 Make uses `cargo` from `PATH`. To select a specific installation, pass
 `CARGO=/path/to/cargo` to `make build` or `make run`.
 
-### Raspberry Pi
+### Raspberry Pi (source builds)
 
 **Note:** Because the `rpi-led-matrix` backend is used, building on Raspberry Pi requires a C++ compiler (`build-essential`) and the `rpi-rgb-led-matrix` C++ library.
 
@@ -62,11 +99,17 @@ cargo build --release --bin led-server --features rpi --no-default-features
 make build   # run on RPi
 ```
 
-To rsync from macOS and build remotely on RPi:
+For development that specifically needs a remote source build, `make deploy`
+still uses rsync and builds on the device. It does not install or activate a
+GitHub Release:
 
 ```bash
 make deploy
 ```
+
+The legacy `sudo make install` target installs the source-built binary's service
+and copies local assets. It is not part of release deployment; do not run it to
+update an Ansible-managed service.
 
 ## Running
 
@@ -83,24 +126,44 @@ cargo run --bin led-server
 make run
 ```
 
-### Raspberry Pi (direct)
+### Raspberry Pi (direct source-built binary)
 
 ```bash
 sudo make run
 ```
 
-### Raspberry Pi (systemd service)
+### Raspberry Pi (deployed systemd service)
+
+Run these commands **on the device** after deployment:
 
 ```bash
-sudo make install    # install and enable autostart
-sudo make status     # check status
-sudo make restart    # restart
-sudo make uninstall  # uninstall
+sudo systemctl status led-server
+sudo journalctl -u led-server -n 50 --no-pager
+/opt/led-service2/current/led-server --version
+/opt/led-service2/current/led-server --check http://127.0.0.1:50051
 ```
 
 The server exits with a non-zero status if gRPC startup or serving fails (for example, when the listen port is already in use), allowing systemd `Restart=on-failure` to restart it.
 
 ## Configuration (environment variables)
+
+For a new Ansible installation, edit the environment file **on the device** and
+restart the service to apply changes:
+
+```sh
+sudoedit /etc/led-service2/environment
+sudo systemctl restart led-server
+```
+
+For example, set `PANEL_REFRESH_RATE="120"` in the file. This limits panel refresh
+to 120 Hz; it does not guarantee the hardware can achieve that rate. Existing
+environment files are preserved by `deploy`, so changes to role defaults do not
+update an installed device. A migrated legacy service retains its original
+configuration source; inspect `sudo systemctl cat led-server` before editing it.
+
+The table below lists binary defaults from `src/config.rs`. Make and the Ansible
+role can provide deployment overrides, such as brightness, GPIO slowdown and
+JSON logging; see [role defaults](ansible/roles/led_service2_release/defaults/main.yaml).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -108,8 +171,10 @@ The server exits with a non-zero status if gRPC startup or serving fails (for ex
 | `PANEL_ROWS` | `32` | Number of LED panel rows |
 | `PANEL_COLS` | `64` | Number of LED panel columns |
 | `PANEL_BRIGHTNESS` | `50` | Brightness (0–100, RPi only) |
-| `PANEL_REFRESH_RATE` | `120` | Refresh rate in Hz (RPi only) |
+| `PANEL_REFRESH_RATE` | `120` | Refresh-rate limit in Hz; `0` means no limit (RPi only) |
 | `PANEL_SLOWDOWN` | unset | GPIO slowdown factor (RPi only) |
+| `PANEL_PWM_BITS` | `11` | PWM bit depth (RPi only) |
+| `PANEL_PWM_LSB_NANOSECONDS` | `130` | PWM least-significant-bit pulse duration in nanoseconds (RPi only) |
 | `WORKER_TIMEOUT` | `30s` | Maximum total processing time per dequeued request, including eye-catch and decoding (e.g. `60s`) |
 | `SCROLL_INTERVAL_MS` | `30` | Scroll speed in milliseconds per pixel |
 | `EYECATCH_PATH` | unset | Path to GIF file shown on request received |
@@ -121,6 +186,23 @@ The server exits with a non-zero status if gRPC startup or serving fails (for ex
 | `JINGLE_PATH` | unset | Path to WAV file played on request received |
 | `RUST_LOG` | `info` | Log level (`debug` / `info` / `warn` / `error`) |
 | `LOG_FORMAT` | text | Set to `json` for structured JSON logging |
+
+### Optional eye-catch and jingle
+
+Release deployment does not upload media files, and new installations leave
+these features disabled. Place the GIF and WAV files on the device, then add
+their paths to `/etc/led-service2/environment`, keeping the other settings:
+
+```ini
+EYECATCH_PATH="/opt/led-service2/assets/butacowalk2.gif"
+EYECATCH_DURATION_MS="5000"
+JINGLE_PATH="/opt/led-service2/assets/splanews.wav"
+```
+
+Restart `led-server` after editing. Either feature can be enabled independently.
+To disable one, remove or comment out its path variable instead of setting it to
+an empty string. Local `assets/` files are ignored by Git and absent from fresh
+clones; prepare them separately.
 
 ## Sending Images
 
@@ -182,8 +264,6 @@ Each request receives a deadline when dequeued: the smaller of `duration_seconds
 Cancellation and deadlines are checked at decoder reads, between GIF frames, during resizing, and between display refreshes. These are cooperative checks: a codec operation already using buffered data or a blocking backend call must return before cancellation takes effect. Image limits bound application-owned buffers; decoder allocation limits are best-effort, and these settings are not a total process RSS limit. Cached eye-catch frames, the current image, render buffers, and queued compressed payloads can coexist.
 
 SIGINT, SIGTERM, closing the emulator window, or pressing Escape stops the worker and discards queued requests. Existing emulator windows continue processing events while idle. gRPC connections get up to two seconds for graceful shutdown. No emulator window is opened until the first frame is displayed.
-
-Local `assets/` files are ignored by Git and absent from a fresh clone. Prepare the required GIF/WAV assets before `sudo make install`, or disable optional paths when running directly.
 
 ## Cargo Features
 
