@@ -20,7 +20,7 @@ ASSETS_DEST   := $(INSTALL_BASE)/assets
 PANEL_ROWS           ?= 32
 PANEL_COLS           ?= 64
 PANEL_BRIGHTNESS     ?= 80
-PANEL_REFRESH_RATE   ?= 60
+PANEL_REFRESH_RATE   ?= 120
 PANEL_SLOWDOWN       ?= 2
 
 # Optional features (leave empty to disable)

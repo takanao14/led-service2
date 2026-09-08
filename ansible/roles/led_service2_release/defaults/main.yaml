@@ -15,7 +15,7 @@ led_service2_release_environment:
   PANEL_ROWS: '32'
   PANEL_COLS: '64'
   PANEL_BRIGHTNESS: '80'
-  PANEL_REFRESH_RATE: '60'
+  PANEL_REFRESH_RATE: '120'
   PANEL_SLOWDOWN: '2'
   RUST_LOG: info
   LOG_FORMAT: json
