@@ -84,3 +84,5 @@ environment (or with `-e ansible_become=true` on the CI runner). It uses a fake
 `systemctl` and temporary unit files, never the real service manager or hardware.
 
 New installations grant the service the `audio` supplementary group so WAV playback remains available after the LED library drops its UID/GID to `daemon`. Existing units are preserved; add `SupplementaryGroups=audio` in a systemd service override and restart when enabling audio on an installation created before this setting.
+
+Apply the stable syslog identity to an existing service with `ansible-playbook playbooks/ops-led_service2_logging.yaml --limit rpi3` from `ansible/`. This restarts the service only when its logging override changes; release and environment configuration are preserved. Homelab manages forwarding and Loki parsing.

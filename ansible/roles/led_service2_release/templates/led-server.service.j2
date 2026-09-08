@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
+SyslogIdentifier=led-server
 User=root
 # The LED library drops UID/GID to daemon but retains supplementary groups.
 SupplementaryGroups=audio

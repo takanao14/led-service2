@@ -1,0 +1,37 @@
+---
+- name: Configure LED service log identity
+  hosts: led_devices
+  become: true
+  serial: 1
+  tasks:
+    - name: Require an existing LED service
+      ansible.builtin.command:
+        argv: [systemctl, show, led-server.service, '--property=LoadState', '--value']
+      register: led_logging_state
+      changed_when: false
+      check_mode: false
+      failed_when: led_logging_state.stdout != 'loaded'
+
+    - name: Create service override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/led-server.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Set stable log identity without changing release configuration
+      ansible.builtin.copy:
+        content: "[Service]\nSyslogIdentifier=led-server\n"
+        dest: /etc/systemd/system/led-server.service.d/20-logging.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart LED service
+
+  handlers:
+    - name: Restart LED service
+      ansible.builtin.systemd_service:
+        name: led-server.service
+        daemon_reload: true
+        state: restarted
