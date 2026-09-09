@@ -13,6 +13,7 @@ pub struct State {
     pub polls: usize,
     pub close_on_poll: bool,
     pub close_on_render: bool,
+    pub poll_delay: Duration,
     pub cancel_on_render: Option<Shutdown>,
 }
 
@@ -43,6 +44,9 @@ impl LedDisplay for FakeDisplay {
         if state.close_on_poll {
             return Err(WindowClosedError.into());
         }
+        let delay = state.poll_delay;
+        drop(state);
+        std::thread::sleep(delay);
         Ok(())
     }
     fn clear(&mut self) -> anyhow::Result<()> {

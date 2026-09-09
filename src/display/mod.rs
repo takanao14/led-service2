@@ -119,6 +119,7 @@ pub fn show(
     img: &DynamicImage,
     mode: DisplayMode,
     scroll_interval: Duration,
+    display_duration: Duration,
     limits: &ImageLimits,
     work: &Work<'_>,
 ) -> Result<()> {
@@ -137,7 +138,9 @@ pub fn show(
     let mut offset = 0;
     let mut last_scroll = Instant::now();
     fill_pixels(&mut pixels, &panel, offset, rows, cols);
-    while Instant::now() < work.deadline {
+    let display_work = display_work(work, display_duration);
+    display_work.check()?;
+    while Instant::now() < display_work.deadline {
         work.check()?;
         display.render_frame(&pixels)?;
         if mode == DisplayMode::ScrollHorizontal && last_scroll.elapsed() >= scroll_interval {
@@ -152,6 +155,7 @@ pub fn show(
 pub fn show_animated(
     display: &mut dyn LedDisplay,
     frames: &[AnimFrame],
+    display_duration: Duration,
     limits: &ImageLimits,
     work: &Work<'_>,
 ) -> Result<()> {
@@ -174,14 +178,16 @@ pub fn show_animated(
         fill_pixels(&mut pixels, &panel, 0, rows, cols);
         panels.push((pixels, frame.delay));
     }
+    let display_work = display_work(work, display_duration);
+    display_work.check()?;
     let mut frame_idx = 0;
-    while Instant::now() < work.deadline {
+    while Instant::now() < display_work.deadline {
         work.check()?;
         let (pixels, delay) = &panels[frame_idx];
         let frame_end = Instant::now()
             .checked_add(*delay)
-            .unwrap_or(work.deadline)
-            .min(work.deadline);
+            .unwrap_or(display_work.deadline)
+            .min(display_work.deadline);
         while Instant::now() < frame_end {
             work.check()?;
             display.render_frame(pixels)?;
@@ -189,6 +195,16 @@ pub fn show_animated(
         frame_idx = (frame_idx + 1) % panels.len();
     }
     Ok(())
+}
+
+fn display_work<'a>(work: &Work<'a>, duration: Duration) -> Work<'a> {
+    Work {
+        shutdown: work.shutdown,
+        deadline: Instant::now()
+            .checked_add(duration)
+            .unwrap_or(work.deadline)
+            .min(work.deadline),
+    }
 }
 
 fn fill_pixels(
@@ -280,6 +296,34 @@ mod tests {
     }
 
     #[test]
+    fn display_duration_starts_after_preparation() {
+        let shutdown = Shutdown::new();
+        let work = Work {
+            shutdown: &shutdown,
+            deadline: Instant::now() + Duration::from_secs(1),
+        };
+        let state = Rc::new(RefCell::new(State {
+            poll_delay: Duration::from_millis(40),
+            ..State::default()
+        }));
+        let mut display = FakeDisplay(state.clone());
+        let started = Instant::now();
+        show(
+            &mut display,
+            &DynamicImage::new_rgb8(4, 2),
+            DisplayMode::Static,
+            Duration::from_millis(1),
+            Duration::from_millis(40),
+            &ImageLimits::default(),
+            &work,
+        )
+        .unwrap();
+
+        assert!(started.elapsed() >= Duration::from_millis(75));
+        assert!(state.borrow().renders > 0);
+    }
+
+    #[test]
     fn scaling_centers_crop_and_black_padding() {
         let shutdown = Shutdown::new();
         let work = Work {
@@ -334,7 +378,14 @@ mod tests {
                 delay: Duration::from_millis(10),
             })
             .collect();
-        assert!(show_animated(&mut display, &frames, &limits, &work).is_err());
+        assert!(show_animated(
+            &mut display,
+            &frames,
+            Duration::from_secs(1),
+            &limits,
+            &work
+        )
+        .is_err());
         assert_eq!(state.borrow().renders, 0);
     }
 
@@ -364,7 +415,14 @@ mod tests {
                 max_render_bytes: budget,
                 ..ImageLimits::default()
             };
-            let err = show_animated(&mut display, &frames, &limits, &work).unwrap_err();
+            let err = show_animated(
+                &mut display,
+                &frames,
+                Duration::from_secs(1),
+                &limits,
+                &work,
+            )
+            .unwrap_err();
             if budget < total {
                 assert!(err.to_string().contains("MAX_RENDER_BYTES"));
                 assert_eq!(state.borrow().renders, 0);
@@ -391,7 +449,14 @@ mod tests {
             image: DynamicImage::new_rgb8(4, 2),
             delay: Duration::from_secs(30),
         }];
-        let err = show_animated(&mut display, &frames, &ImageLimits::default(), &work).unwrap_err();
+        let err = show_animated(
+            &mut display,
+            &frames,
+            Duration::from_secs(30),
+            &ImageLimits::default(),
+            &work,
+        )
+        .unwrap_err();
         assert!(err.is::<crate::shutdown::Stopped>());
         assert_eq!(state.borrow().renders, 1);
     }

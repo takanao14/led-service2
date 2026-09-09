@@ -39,13 +39,13 @@ pub fn run_loop(
         let work = Work {
             shutdown,
             deadline: Instant::now()
-                .checked_add(req.duration.min(cfg.worker_timeout))
-                .ok_or_else(|| anyhow::anyhow!("request duration is too large"))?,
+                .checked_add(cfg.worker_timeout)
+                .ok_or_else(|| anyhow::anyhow!("worker timeout is too large"))?,
         };
         if shutdown.is_cancelled() {
             break;
         }
-        tracing::info!(duration = ?req.duration, mime_type = %req.mime_type, "processing display request");
+        tracing::info!(display_duration = ?req.duration, mime_type = %req.mime_type, "processing display request");
         let result = process_request(
             &mut *display,
             &req,
@@ -96,15 +96,14 @@ fn process_request(
         play_jingle(path);
     }
     if let Some(frames) = eyecatch_frames {
-        let eye_work = Work {
-            shutdown: work.shutdown,
-            deadline: Instant::now()
-                .checked_add(cfg.eyecatch_duration)
-                .unwrap_or(work.deadline)
-                .min(work.deadline),
-        };
         if cfg.eyecatch_duration > Duration::ZERO {
-            match crate::display::show_animated(display, frames, &cfg.image_limits, &eye_work) {
+            match crate::display::show_animated(
+                display,
+                frames,
+                cfg.eyecatch_duration,
+                &cfg.image_limits,
+                work,
+            ) {
                 Err(e) if e.is::<WindowClosedError>() => return Err(e),
                 Err(e) if !e.is::<Stopped>() => {
                     tracing::warn!(error = %e, "eye-catch display error");
@@ -117,7 +116,7 @@ fn process_request(
     work.check()?;
     if is_gif(&req.mime_type) {
         let frames = crate::decode::gif(&req.image_data, &cfg.image_limits, work)?;
-        crate::display::show_animated(display, &frames, &cfg.image_limits, work)
+        crate::display::show_animated(display, &frames, req.duration, &cfg.image_limits, work)
     } else {
         let image = crate::decode::image(&req.image_data, &cfg.image_limits, work)?;
         crate::display::show(
@@ -125,6 +124,7 @@ fn process_request(
             &image,
             resolve_display_mode(req.display_mode, &req.mime_type),
             cfg.scroll_interval,
+            req.duration,
             &cfg.image_limits,
             work,
         )

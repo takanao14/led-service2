@@ -156,7 +156,7 @@ service may use another configuration source; inspect
 | `PANEL_SLOWDOWN` | unset | GPIO slowdown factor (RPi only) |
 | `PANEL_PWM_BITS` | `11` | PWM bit depth (RPi only) |
 | `PANEL_PWM_LSB_NANOSECONDS` | `130` | PWM least-significant-bit pulse duration in nanoseconds (RPi only) |
-| `WORKER_TIMEOUT` | `30s` | Maximum total processing time per dequeued request, including eye-catch and decoding (e.g. `60s`) |
+| `WORKER_TIMEOUT` | `30s` | Maximum total processing time per dequeued request, including eye-catch, decoding, preparation, and main display (e.g. `60s`) |
 | `SCROLL_INTERVAL_MS` | `30` | Scroll speed in milliseconds per pixel |
 | `EYECATCH_PATH` | unset | Path to GIF file shown when request processing starts |
 | `EYECATCH_DURATION_MS` | `3000` | Eye-catch display duration in milliseconds |
@@ -209,7 +209,7 @@ cargo run --bin led-client -- --addr http://raspberrypi.local:50051 --file image
 |--------|---------|-------------|
 | `--addr` | `http://localhost:50051` | Server address |
 | `--file` | required | Path to image file to send |
-| `--duration` | `10` | Display duration in seconds |
+| `--duration` | `10` | Main image display duration in seconds, excluding eye-catch and preparation |
 | `--mime` | auto-detected from extension | MIME type |
 | `--display-mode` | inferred from file type | `static` or `scroll` |
 
@@ -238,9 +238,11 @@ or display. A full queue returns `RESOURCE_EXHAUSTED`; shutdown or a stopped wor
 returns `UNAVAILABLE`. Invalid images are rejected later by the worker and logged.
 The gRPC receive limit is 4 MiB.
 
-Processing is sequential. Its deadline starts at dequeue and is the smaller of
-`duration_seconds` and `WORKER_TIMEOUT`; queue waiting is excluded. Shutdown
-discards queued requests. See [`src/shutdown.rs`](src/shutdown.rs),
+Processing is sequential. The `WORKER_TIMEOUT` deadline starts at dequeue and
+includes eye-catch loading/playback, decoding, preparation, and main display;
+queue waiting is excluded. `duration_seconds` starts after the main image is
+decoded and prepared, so it represents actual main display time unless the
+remaining worker timeout is shorter. Shutdown discards queued requests. See [`src/shutdown.rs`](src/shutdown.rs),
 [`src/worker.rs`](src/worker.rs) and [`src/decode.rs`](src/decode.rs) for
 cancellation and resource-limit details.
 
