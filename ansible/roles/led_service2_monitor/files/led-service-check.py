@@ -15,10 +15,27 @@ def succeeds(command, timeout):
         return 0
 
 
+def restarts(service, timeout):
+    """systemd restart count, or None when it cannot be read.
+
+    A crash loop keeps the unit active between restarts, so led_service_active
+    cannot see it. Omitting the metric on failure keeps a stale counter from
+    looking like a steady value.
+    """
+    try:
+        result = subprocess.run(["systemctl", "show", service, "--property=NRestarts", "--value"],
+                                timeout=timeout, check=False, capture_output=True, text=True)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    value = result.stdout.strip()
+    return int(value) if result.returncode == 0 and value.isdigit() else None
+
+
 def collect(binary, url, service, timeout):
     active = succeeds(["systemctl", "is-active", "--quiet", service], timeout)
     grpc = succeeds([binary, "--check", url], timeout)
-    return (
+    restart_count = restarts(service, timeout)
+    metrics = (
         "# HELP led_service_active Whether the systemd service is active.\n"
         "# TYPE led_service_active gauge\n"
         f"led_service_active {active}\n"
@@ -29,6 +46,13 @@ def collect(binary, url, service, timeout):
         "# TYPE led_service_check_timestamp_seconds gauge\n"
         f"led_service_check_timestamp_seconds {time.time():.3f}\n"
     )
+    if restart_count is not None:
+        metrics += (
+            "# HELP led_service_restarts_total systemd restarts since the unit was last started cleanly.\n"
+            "# TYPE led_service_restarts_total counter\n"
+            f"led_service_restarts_total {restart_count}\n"
+        )
+    return metrics
 
 
 def publish(output, metrics):
