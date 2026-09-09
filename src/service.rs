@@ -61,9 +61,17 @@ impl ImageService for LedImageService {
                 .unwrap_or(DisplayMode::Unspecified),
         };
 
+        // Rejections are otherwise invisible to operators: the client sees a status
+        // code, and the availability probe keeps reporting a healthy service.
         self.queue_tx.try_send(display_req).map_err(|e| match e {
-            TrySendError::Full(_) => Status::resource_exhausted("display queue is full"),
-            TrySendError::Disconnected(_) => Status::unavailable("display worker has stopped"),
+            TrySendError::Full(_) => {
+                tracing::warn!("display queue is full, rejecting request");
+                Status::resource_exhausted("display queue is full")
+            }
+            TrySendError::Disconnected(_) => {
+                tracing::error!("display worker has stopped, rejecting request");
+                Status::unavailable("display worker has stopped")
+            }
         })?;
 
         tracing::info!(duration_seconds = req.duration_seconds, "request queued");

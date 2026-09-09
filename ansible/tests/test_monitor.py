@@ -18,10 +18,20 @@ class MonitorTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
-        for name, variable in [("systemctl", "ACTIVE_RC"), ("led-server", "GRPC_RC")]:
-            command = self.root / name
-            command.write_text(f"#!{sys.executable}\nimport os,sys\nsys.exit(int(os.getenv('{variable}', '0')))\n")
-            command.chmod(0o755)
+        systemctl = self.root / "systemctl"
+        # show prints NRestarts; every other subcommand only sets an exit code.
+        systemctl.write_text(
+            f"#!{sys.executable}\n"
+            "import os,sys\n"
+            "if 'show' in sys.argv:\n"
+            "    sys.stdout.write(os.getenv('RESTARTS', '0') + '\\n')\n"
+            "    sys.exit(int(os.getenv('SHOW_RC', '0')))\n"
+            "sys.exit(int(os.getenv('ACTIVE_RC', '0')))\n"
+        )
+        systemctl.chmod(0o755)
+        command = self.root / "led-server"
+        command.write_text(f"#!{sys.executable}\nimport os,sys\nsys.exit(int(os.getenv('GRPC_RC', '0')))\n")
+        command.chmod(0o755)
         self.environment = patch.dict(os.environ, {"PATH": str(self.root) + os.pathsep + os.environ["PATH"]})
         self.environment.start()
         self.addCleanup(self.environment.stop)
@@ -38,6 +48,17 @@ class MonitorTests(unittest.TestCase):
         self.assertIn("led_service_check_timestamp_seconds 200.000", output.read_text())
         self.assertEqual(output.stat().st_mode & 0o777, 0o644)
         self.assertEqual(list(self.root.glob(".led-service-*")), [])
+
+    def test_restart_count_is_published_and_omitted_when_unreadable(self):
+        output = self.root / "led_service.prom"
+        with patch.dict(os.environ, {"RESTARTS": "4"}):
+            monitor.publish(output, monitor.collect(str(self.root / "led-server"), "http://localhost", "led-server", 1))
+        self.assertIn("led_service_restarts_total 4", output.read_text())
+        # A failed read must not leave the previous count looking current.
+        with patch.dict(os.environ, {"SHOW_RC": "1"}):
+            monitor.publish(output, monitor.collect(str(self.root / "led-server"), "http://localhost", "led-server", 1))
+        self.assertNotIn("led_service_restarts_total", output.read_text())
+        self.assertIn("led_service_active 1", output.read_text())
 
     def test_missing_binary_and_timeout_are_failed_probes(self):
         self.assertEqual(monitor.succeeds([str(self.root / "missing")], 1), 0)
