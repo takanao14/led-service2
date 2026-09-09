@@ -39,10 +39,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// Load configuration from environment variables, falling back to defaults.
-    ///
-    /// # Errors
-    /// Returns an error if `WORKER_TIMEOUT` is set but cannot be parsed as a duration.
+    /// Load environment variables, using defaults where documented above.
     pub fn from_env() -> anyhow::Result<Self> {
         let grpc_addr: SocketAddr = std::env::var("GRPC_ADDR")
             .unwrap_or_else(|_| "0.0.0.0:50051".to_string())
@@ -76,7 +73,6 @@ impl Config {
         let panel_pwm_lsb_nanoseconds = env_parse::<u32>("PANEL_PWM_LSB_NANOSECONDS", 130);
         let jingle_path = std::env::var("JINGLE_PATH").ok();
         let eyecatch_path = std::env::var("EYECATCH_PATH").ok();
-        // Default: 3000 ms (matches the field-level doc comment).
         let eyecatch_duration_ms = env_parse::<u64>("EYECATCH_DURATION_MS", 3000);
 
         let image_limits = ImageLimits::from_env()?;
@@ -100,12 +96,7 @@ impl Config {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
-
-/// Parse an environment variable as `T`, falling back to `default` and logging
-/// a warning when the value is present but cannot be parsed.
+/// Invalid values produce a warning and use `default`.
 fn env_parse<T>(key: &str, default: T) -> T
 where
     T: std::str::FromStr + std::fmt::Display + Copy,
@@ -120,9 +111,7 @@ where
     }
 }
 
-/// Parse an optional environment variable as `T`.
-/// Returns `None` if the variable is unset; logs a warning and returns `None`
-/// if the value is present but cannot be parsed.
+/// Missing or invalid values produce `None`; invalid values also produce a warning.
 fn env_parse_opt<T>(key: &str) -> Option<T>
 where
     T: std::str::FromStr,

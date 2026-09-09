@@ -1,137 +1,107 @@
 # Releases and deployment
 
-Release binaries target Raspberry Pi running Debian 13 (trixie), ARM64, with
-glibc 2.41. macOS development continues to use `make run`; no emulator binary
-is published. Build jobs run in a Debian trixie container on an ARM64 runner.
-Install the runtime ALSA library (`libasound2t64`) on the device. Other runtime
-libraries are recorded in `build-info.json`; executing `--version` checks that
-the dynamic loader can resolve them before
-activation. CI does not verify LED or audio hardware behavior.
+Release binaries target Raspberry Pi on Debian 13 (trixie), ARM64, with glibc
+2.41. No emulator binary is published. CI verifies software behavior but not
+physical LED or audio hardware.
+
+## Requirements
+
+The macOS controller requires Ansible, an authenticated GitHub CLI (`gh`), and
+SSH access to the device. The remote account needs sudo privileges; use
+`ANSIBLE_ARGS=--ask-become-pass` when required. The device requires Python 3 and
+the runtime libraries listed in `build-info.json`, including `libasound2t64`.
+
+Commands below run from the repository root. They use the default inventory at
+`ansible/inventories/homelab/hosts.yaml`; override it with `ANSIBLE_INVENTORY`.
+See [ansible/README.md](ansible/README.md) for direct playbook commands.
 
 ## Publishing
 
-1. Update the package version in `Cargo.toml` and `Cargo.lock` together.
-2. Merge the reviewed change after CI passes.
-3. Create and push an annotated matching tag, for example `v0.1.0`.
+1. Update the version in `Cargo.toml` and `Cargo.lock`.
+2. Merge the change after CI passes.
+3. Create and push a matching annotated tag, such as `v0.2.0`.
 
-Tag pushes validate the version, run CI, build the archive, verify its contents
-and checksums, and create a GitHub Release. Tags containing a prerelease suffix
-such as `v0.2.0-rc.1` publish a prerelease. Published releases are not overwritten.
-Release publication never connects to a device. PR and main builds upload
-temporary artifacts for verification; only tagged releases are deployment inputs.
+A tag push validates the version, runs CI, builds and verifies the archives,
+and creates a GitHub Release. A suffix such as `v0.2.0-rc.1` creates a
+prerelease. Publication never connects to a device or overwrites an existing
+release.
 
-Each release contains a binary archive, a source archive (including the API
-submodule and vendored Cargo dependencies with their license files), and
-`checksums.txt`. The source archive can be built with `cargo build --offline
---locked --release --bin led-server --no-default-features --features rpi` after
-installing Rust, build-essential, pkg-config, libasound2-dev and protobuf-compiler. Set
-`LED_BUILD_REVISION` to the commit recorded in `build-info.json` to preserve the
-revision log. Vendoring does not bundle the operating system toolchain or system
-libraries. Archive metadata is normalized; bit-identical binary builds are not
-guaranteed. Source archive generation uses tracked files, so commit new source
-files before packaging locally.
-
-## First installation
-
-If `led-server.service` is not registered, use `deploy`:
+Each release contains a binary archive, a vendored source archive, and
+`checksums.txt`. To build the source archive on Raspberry Pi, install Rust,
+Git, `build-essential`, `pkg-config`, `libasound2-dev`, and
+`protobuf-compiler`, then run:
 
 ```sh
-make deploy-release VERSION=v0.1.0 RPI_HOST=rpi3
+cargo build --offline --locked --release --bin led-server \
+  --no-default-features --features rpi
 ```
 
-After verifying the binary, Ansible creates `/etc/led-service2/environment`,
-`/etc/systemd/system/led-server.service`, and the `current` link, then enables
-and starts the service. The unit runs as root for hardware access and uses
-`/opt/led-service2` as its working directory. It does not require a source
-checkout or a permissive audio udev rule. Install the runtime dependencies
-listed above before deployment.
+Set `LED_BUILD_REVISION` to the commit in `build-info.json` to preserve the
+revision log. The archive includes tracked project files and vendored Cargo
+dependencies, but not the operating-system toolchain or libraries.
 
-Initial settings use a 32-row, 64-column panel and listen on `0.0.0.0:50051`.
-The optional eye-catch and jingle are disabled until configured. No media files
-are uploaded. Configure the initial environment with the role variable
-`led_service2_release_environment`, or edit `/etc/led-service2/environment`
-and restart the service. Add `EYECATCH_PATH` and `JINGLE_PATH` only after placing
-the corresponding files on the device. Existing environment files are preserved,
-including on subsequent updates; changing role defaults does not rewrite them.
+## Installation and migration
 
-If first startup fails, Ansible stops and disables the new service and removes
-the new unit, current link, and environment file (only if created in that run).
-Existing configuration, assets and downloaded releases remain available. Fix
-the cause and retry `deploy`. If stopping the service itself fails, cleanup
-stops too so that files still used by a running service are not deleted.
-
-`migrate` and `rollback` require a registered service. A legacy source-based
-service still requires the explicit migration described below. Incomplete
-installations with an orphan current link or drop-in are rejected for inspection.
-
-## Initial migration from a source installation
-
-The existing `led-server.service` must already be installed and working. Keep
-its assets and configuration in place. Migration requires a single ExecStart
-executable without arguments; use `deploy` when the service is not registered.
-
-On the development machine, install Ansible and GitHub CLI (`gh`), authenticate
-with access to the release repository, and configure SSH access to `rpi3`.
-The remote account needs sudo privileges. Pass `ANSIBLE_ARGS=--ask-become-pass`
-if sudo requires a password. Debian Python 3 must be installed for Ansible's
-built-in modules; this repository has no custom Python deployment scripts.
-Downloads occur locally, so GitHub credentials are not copied to the device.
-The Ansible layout and direct commands are documented in [ansible/README.md](ansible/README.md).
-Inventory defaults to `ansible/inventories/homelab/hosts.yaml`, containing the SSH alias `rpi3`.
-For other devices, supply an inventory with a `led_devices` group using
-`ANSIBLE_INVENTORY`, and select the host with `RPI_HOST`.
+Install a new service or update an existing release-based service with:
 
 ```sh
-make migrate-release VERSION=v0.1.0 RPI_HOST=rpi3
+make deploy-release VERSION=v0.2.0 RPI_HOST=rpi3
 ```
 
-This backs up the current executable and effective service configuration under
-`/opt/led-service2/releases/legacy-<timestamp>/`, then creates a systemd drop-in
-at `/etc/systemd/system/led-server.service.d/90-release.conf` overriding only
-ExecStart to `/opt/led-service2/current/led-server`. Existing environment,
-WorkingDirectory, audio rules and assets remain in use; keep the old checkout
-if WorkingDirectory points there. Migration restarts the service. A failed
-activation restores the previous binary; failed migration removes its drop-in
-and restores the original service command. Backups and release directories are
-retained for inspection.
+A new installation creates `/etc/led-service2/environment`, installs and enables
+`led-server.service`, and runs `/opt/led-service2/current/led-server`. Releases
+are retained under `/opt/led-service2/releases/`. The service runs as root and
+does not require a source checkout or permissive audio udev rule.
 
-To undo a successful migration, remove only the above drop-in, run
-`sudo systemctl daemon-reload`, then `sudo systemctl restart led-server`.
-This relies on the original executable remaining available at its original path.
-After confirming recovery, remove the `current` symlink if migrating again.
+The initial configuration uses a 32x64 panel and listens on
+`0.0.0.0:50051`. Eye-catch and jingle playback remain disabled until their files
+and environment variables are added. Release deployment never uploads or deletes
+media. Existing environment files are preserved during updates.
+
+To migrate a registered source-based service, run:
+
+```sh
+make migrate-release VERSION=v0.2.0 RPI_HOST=rpi3
+```
+
+Migration requires one `ExecStart` executable without arguments. It backs up the
+executable and effective unit configuration under
+`/opt/led-service2/releases/legacy-<timestamp>/`, then overrides only
+`ExecStart`. Existing configuration, working directory, assets, and audio rules
+remain in use; retain the old checkout if the working directory refers to it.
 
 ## Updating and rolling back
 
 ```sh
-make deploy-release VERSION=v0.1.1 RPI_HOST=rpi3
-make rollback VERSION=v0.1.0 RPI_HOST=rpi3
+make deploy-release VERSION=v0.2.1 RPI_HOST=rpi3
+make rollback VERSION=v0.2.0 RPI_HOST=rpi3
 ```
 
-Releases are stored at `/opt/led-service2/releases/<tag>/`. A device-wide lock
-prevents concurrent updates. Ansible verifies SHA-256, archive entries,
-metadata and `--version` before atomically switching `current` and restarting
-systemd. Existing version directories cannot be replaced with different bytes.
-Rollback requires a previously installed tagged release. No automatic pruning
-occurs. Checksums detect corruption; trust comes from the selected GitHub
-repository and authenticated HTTPS download.
+Deployment verifies the SHA-256 checksum, archive layout, metadata, executable
+version, and runtime linkage before atomically changing `current`. Applying the
+active version verifies it without restarting. Rollback requires a previously
+installed release. Releases are not pruned automatically.
 
-Applying an already active version verifies it without restarting the service.
-Ansible releases its lock in an `always` block. If the controller is killed or
-SSH becomes unreachable, inspect the service and current link before manually
-removing `/opt/led-service2/.ansible-deploy-lock` and rerunning. Automated rescue
-cannot recover an unreachable host. `ANSIBLE_ARGS=--check` validates inputs and
-OS facts only; it deliberately ends before downloads and service mutations.
+The post-activation probe requires three consecutive gRPC responses and an
+active systemd service. Override `PROBE_URL` if the service listens elsewhere.
+The probe does not display an image and cannot verify LED or audio output.
 
-The post-restart check requires systemd to be active and three consecutive gRPC
-responses. `led-server --check http://127.0.0.1:50051` sends a request without an
-image and checks its expected validation error; it never queues a display request.
-Override `PROBE_URL` when the service listens elsewhere. This confirms service
-responsiveness, not successful physical LED/audio output. Check that separately
-for the first release and hardware-related changes.
+## Failure recovery
 
-If the new service fails, the playbook switches back and restarts the previous
-version. It exits unsuccessfully even when recovery succeeds; inspect its output
-and `journalctl -u led-server` before retrying. `assets/` is never synchronized or
-deleted by release deployment. The old `make deploy` remains available for source
-sync and device builds; do not use `make install` after migration to overwrite
-the existing service configuration unintentionally.
+If activation fails, Ansible restores and restarts the previous version, then
+exits unsuccessfully even when recovery succeeds. Inspect the playbook output
+and `journalctl -u led-server` before retrying.
+
+A failed first installation removes the unit, current link, and any environment
+file created by that run. Existing configuration, assets, and downloaded
+releases remain. Migration failure removes its override and restores the
+original service command.
+
+A device-wide lock prevents concurrent deployments. If the controller stops or
+loses SSH connectivity, inspect the service and `current` link before manually
+removing `/opt/led-service2/.ansible-deploy-lock`. Automated recovery cannot
+repair an unreachable host. `ANSIBLE_ARGS=--check` validates inputs and OS facts
+without downloading or changing the service.
+
+Do not use the legacy `make install` target after migration; it can overwrite
+the preserved service configuration.

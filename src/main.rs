@@ -5,8 +5,6 @@ mod service;
 mod shutdown;
 mod worker;
 
-// Re-export the proto module from the library crate so that submodules can
-// continue to use `crate::proto::...` without any changes.
 pub use led_service2::proto;
 
 use anyhow::Context;
@@ -32,7 +30,6 @@ fn check_service(url: String) -> anyhow::Result<()> {
             tokio::time::timeout(std::time::Duration::from_secs(3), async {
                 let mut client =
                     proto::image_service_client::ImageServiceClient::connect(url).await?;
-                // Missing images are rejected before queueing or display processing.
                 match client.send_image(proto::SendImageRequest::default()).await {
                     Err(status)
                         if status.code() == tonic::Code::InvalidArgument
@@ -48,16 +45,6 @@ fn check_service(url: String) -> anyhow::Result<()> {
         })
 }
 
-/// Entry point.
-///
-/// # Threading model
-/// - **Main thread**: runs the display loop (required by minifb/Cocoa on macOS).
-/// - **Background thread**: runs the tokio runtime hosting the gRPC server.
-/// - A bounded channel (capacity 10) connects the gRPC service to the display loop.
-///
-/// # Logging
-/// Set `RUST_LOG` to control log level (e.g. `RUST_LOG=debug`).
-/// Set `LOG_FORMAT=json` to switch to structured JSON output (recommended for production).
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     if let Some(url) = args.check {
@@ -84,11 +71,9 @@ fn main() -> anyhow::Result<()> {
         "starting led-service2"
     );
 
-    // Bounded channel connecting the gRPC handler to the display worker.
     let (tx, rx) = std::sync::mpsc::sync_channel::<DisplayRequest>(10);
 
-    // gRPC server runs in a background thread so the main thread stays free
-    // for the display loop.
+    // minifb/Cocoa requires the display loop to remain on the main thread.
     let cfg_grpc = cfg.clone();
     let shutdown = shutdown::Shutdown::new();
     let grpc_shutdown = shutdown.clone();
@@ -130,7 +115,6 @@ fn main() -> anyhow::Result<()> {
             })
     });
 
-    // Display loop must run on the main thread (minifb requires Cocoa on macOS).
     let worker_result =
         display::create(&cfg).and_then(|display| worker::run_loop(display, rx, &cfg, &shutdown));
     shutdown.cancel();
@@ -142,7 +126,6 @@ fn main() -> anyhow::Result<()> {
     worker_result
 }
 
-/// Wait for SIGINT (Ctrl+C) or SIGTERM and return.
 async fn shutdown_signal() {
     use tokio::signal;
 

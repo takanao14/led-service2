@@ -184,15 +184,7 @@ fn resolve_display_mode(proto_mode: ProtoDisplayMode, mime_type: &str) -> Displa
     }
 }
 
-/// Play the WAV file at `path` in a background thread.
-///
-/// The audio runs concurrently with image display. Errors are logged but do not
-/// affect display.
-///
-/// On Linux, opens the USB audio card directly via the ALSA `alsa` crate using a
-/// numeric card index (`plughw:N,0`). This bypasses PipeWire/PulseAudio name
-/// resolution, which fails when running as a systemd service without a user session.
-/// On other platforms, uses rodio with the system default sink.
+/// Play concurrently; audio errors do not fail display processing.
 fn play_jingle(path: &str) {
     let path = path.to_owned();
     std::thread::spawn(move || {
@@ -221,10 +213,7 @@ fn play_jingle(path: &str) {
     });
 }
 
-/// Play a WAV file directly via ALSA using the USB audio card's numeric index.
-///
-/// Uses `plughw:N,0` to avoid ALSA name resolution (which fails in systemd services
-/// without a user session). Supports 16-bit int, 32-bit int, and 32-bit float WAV.
+/// A numeric ALSA device avoids name resolution without a user session.
 #[cfg(target_os = "linux")]
 fn play_via_alsa(path: &str) -> anyhow::Result<()> {
     use alsa::pcm::{Access, HwParams, PCM};
@@ -322,10 +311,6 @@ fn wav_to_alsa_format(fmt: hound::SampleFormat, bits: u16) -> anyhow::Result<als
     }
 }
 
-/// Read `/proc/asound/cards` and return the numeric index of the first USB audio device.
-/// Format: " N [ShortName    ]: driver - Full Name"
-/// Using a numeric index avoids snd_config_get_card name-resolution, which fails in
-/// some environments (e.g. as a child process of a systemd service with cleared env).
 #[cfg(target_os = "linux")]
 fn usb_audio_card_index() -> Option<u32> {
     let content = std::fs::read_to_string("/proc/asound/cards").ok()?;

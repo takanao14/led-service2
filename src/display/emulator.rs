@@ -7,14 +7,11 @@ use crate::config::Config;
 
 use super::LedDisplay;
 
-/// Pause after presenting a frame, pacing the emulator window at ~60 fps.
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
-/// Scale factor: each LED pixel is rendered as SCALE x SCALE screen pixels.
 const SCALE: usize = 10;
 
-/// Radius of the circular LED dot within each SCALE x SCALE cell.
-/// Pixels outside this radius are rendered black to simulate gaps between LEDs.
+/// Leaves a black gap around each simulated LED.
 const LED_RADIUS: f32 = (SCALE as f32) * 0.45;
 
 pub struct EmulatorDisplay {
@@ -69,9 +66,6 @@ impl LedDisplay for EmulatorDisplay {
         let win_w = self.win_w;
         let win_h = self.win_h;
 
-        // Build scaled u32 buffer (0x00RRGGBB).
-        // Each LED pixel is drawn as a filled circle; pixels outside the circle
-        // remain black to simulate the gap between physical LEDs.
         let mut buffer = vec![0u32; win_w * win_h];
         let center = (SCALE as f32 - 1.0) / 2.0;
         for py in 0..self.rows {

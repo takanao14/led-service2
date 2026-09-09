@@ -212,20 +212,13 @@ fn fill_pixels(
 #[error("window closed")]
 pub struct WindowClosedError;
 
-// ---------------------------------------------------------------------------
-// Backend selection
-// ---------------------------------------------------------------------------
-
 #[cfg(not(feature = "rpi"))]
 mod emulator;
 
 #[cfg(feature = "rpi")]
 mod rpi;
 
-/// Create the appropriate display backend based on compiled features.
-///
-/// - Without `--features rpi`: uses the [`emulator`] backend (minifb window).
-/// - With `--features rpi`: uses the [`rpi`] backend (rpi-led-panel hardware).
+/// Select the RPi backend when its feature is enabled; otherwise use the emulator.
 pub fn create(cfg: &Config) -> Result<Box<dyn LedDisplay>> {
     #[cfg(feature = "rpi")]
     {
