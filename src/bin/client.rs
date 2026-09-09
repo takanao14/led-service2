@@ -6,7 +6,6 @@ use led_service2::proto;
 use proto::image_service_client::ImageServiceClient;
 use proto::{DisplayMode, ImageData, SendImageRequest};
 
-/// Command-line arguments for `led-client`.
 #[derive(Parser, Debug)]
 #[command(about = "LED service client — send an image to the LED panel server")]
 struct Args {
@@ -31,7 +30,6 @@ struct Args {
     display_mode: Option<DisplayModeArg>,
 }
 
-/// Display mode selectable from the command line.
 #[derive(Debug, Clone, ValueEnum)]
 enum DisplayModeArg {
     /// Show image statically.
@@ -40,9 +38,6 @@ enum DisplayModeArg {
     Scroll,
 }
 
-/// Infer the MIME type from the file extension.
-///
-/// Returns `None` for unknown extensions; callers should warn the user and fall back.
 fn detect_mime(path: &str) -> Option<&'static str> {
     let lower = path.to_lowercase();
     if lower.ends_with(".ppm") || lower.ends_with(".pnm") || lower.ends_with(".pgm") {
