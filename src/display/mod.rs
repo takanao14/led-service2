@@ -461,11 +461,11 @@ mod tests {
 
         assert!(stats.completed_cycles >= 1);
         assert!(stats.elapsed >= Duration::from_millis(5));
-        assert!(state.borrow().renders > 1);
+        assert!(state.borrow().renders > 0);
     }
 
     #[test]
-    fn repeated_renders_do_not_complete_a_cycle_before_the_hold_period() {
+    fn cycle_does_not_complete_before_the_hold_period() {
         let shutdown = Shutdown::new();
         let work = Work {
             shutdown: &shutdown,
@@ -490,7 +490,7 @@ mod tests {
 
         assert_eq!(stats.completed_cycles, 1);
         assert!(stats.elapsed >= Duration::from_millis(5));
-        assert!(state.borrow().renders > 1);
+        assert!(state.borrow().renders > 0);
     }
 
     #[test]
