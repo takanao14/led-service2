@@ -2,14 +2,14 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
-use crate::display::{AnimFrame, DisplayMode, LedDisplay, WindowClosedError};
+use crate::display::{AnimFrame, DisplayLimit, DisplayMode, LedDisplay, WindowClosedError};
 use crate::proto::DisplayMode as ProtoDisplayMode;
 use crate::shutdown::{Shutdown, Stopped, Work};
 
 pub struct DisplayRequest {
     pub image_data: Vec<u8>,
     pub mime_type: String,
-    pub duration: Duration,
+    pub limit: DisplayLimit,
     pub display_mode: ProtoDisplayMode,
 }
 
@@ -45,7 +45,7 @@ pub fn run_loop(
         if shutdown.is_cancelled() {
             break;
         }
-        tracing::info!(display_duration = ?req.duration, mime_type = %req.mime_type, "processing display request");
+        tracing::info!(display_limit = ?req.limit, mime_type = %req.mime_type, "processing display request");
         let result = process_request(
             &mut *display,
             &req,
@@ -59,11 +59,14 @@ pub fn run_loop(
         match result {
             Ok(()) => tracing::info!("display done"),
             Err(e) if e.is::<WindowClosedError>() => break,
-            Err(_) if shutdown.is_cancelled() => break,
-            Err(e) if e.is::<Stopped>() || Instant::now() >= work.deadline => {
-                tracing::info!("request deadline exceeded");
+            Err(_) if shutdown.is_cancelled() => {
+                tracing::info!(reason = "shutdown", "display interrupted");
+                break;
             }
-            Err(e) => tracing::error!(error = %e, "display error"),
+            Err(e) if e.is::<Stopped>() || Instant::now() >= work.deadline => {
+                tracing::info!(reason = "worker_timeout", "request deadline exceeded");
+            }
+            Err(e) => tracing::error!(reason = "error", error = %e, "display error"),
         }
     }
     display.clear()?;
@@ -116,18 +119,44 @@ fn process_request(
     work.check()?;
     if is_gif(&req.mime_type) {
         let frames = crate::decode::gif(&req.image_data, &cfg.image_limits, work)?;
-        crate::display::show_animated(display, &frames, req.duration, &cfg.image_limits, work)
+        let DisplayLimit::Duration(duration) = req.limit else {
+            anyhow::bail!("GIF requests require a duration limit");
+        };
+        crate::display::show_animated(display, &frames, duration, &cfg.image_limits, work)
     } else {
         let image = crate::decode::image(&req.image_data, &cfg.image_limits, work)?;
-        crate::display::show(
+        let stats = crate::display::show(
             display,
             &image,
             resolve_display_mode(req.display_mode, &req.mime_type),
             cfg.scroll_interval,
-            req.duration,
+            req.limit,
             &cfg.image_limits,
             work,
-        )
+        )?;
+        match req.limit {
+            DisplayLimit::Duration(_) => tracing::info!(
+                reason = "duration_completed",
+                completed_cycles = stats.completed_cycles,
+                prepared_width_px = stats.prepared_width_px,
+                elapsed_ms = stats.elapsed.as_millis(),
+                "main display completed"
+            ),
+            DisplayLimit::ScrollCycles {
+                cycles,
+                min_display_duration,
+            } => tracing::info!(
+                reason = "cycles_completed",
+                requested_cycles = cycles.get(),
+                completed_cycles = stats.completed_cycles,
+                prepared_width_px = stats.prepared_width_px,
+                min_display_seconds = min_display_duration.as_secs(),
+                scroll_interval_ms = cfg.scroll_interval.as_millis(),
+                elapsed_ms = stats.elapsed.as_millis(),
+                "main display completed"
+            ),
+        }
+        Ok(())
     }
 }
 
@@ -170,7 +199,7 @@ fn load_eyecatch(path: &str, cfg: &Config, work: &Work<'_>) -> anyhow::Result<Ve
     crate::decode::gif(&data, &cfg.image_limits, work)
 }
 
-fn resolve_display_mode(proto_mode: ProtoDisplayMode, mime_type: &str) -> DisplayMode {
+pub(crate) fn resolve_display_mode(proto_mode: ProtoDisplayMode, mime_type: &str) -> DisplayMode {
     match proto_mode {
         ProtoDisplayMode::Static => DisplayMode::Static,
         ProtoDisplayMode::Scroll => DisplayMode::ScrollHorizontal,
@@ -342,7 +371,7 @@ mod tests {
         DisplayRequest {
             image_data: test_support::png(4, 2),
             mime_type: "image/png".into(),
-            duration: Duration::from_secs(30),
+            limit: DisplayLimit::Duration(Duration::from_secs(30)),
             display_mode: ProtoDisplayMode::Static,
         }
     }

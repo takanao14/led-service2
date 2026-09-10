@@ -9,6 +9,7 @@ use crate::shutdown::Shutdown;
 #[derive(Default)]
 pub struct State {
     pub renders: usize,
+    pub rendered_frames: Vec<Vec<(u8, u8, u8)>>,
     pub clears: usize,
     pub polls: usize,
     pub close_on_poll: bool,
@@ -26,9 +27,10 @@ impl LedDisplay for FakeDisplay {
     fn cols(&self) -> usize {
         4
     }
-    fn render_frame(&mut self, _: &[(u8, u8, u8)]) -> anyhow::Result<()> {
+    fn render_frame(&mut self, pixels: &[(u8, u8, u8)]) -> anyhow::Result<()> {
         let mut state = self.0.borrow_mut();
         state.renders += 1;
+        state.rendered_frames.push(pixels.to_vec());
         if state.close_on_render {
             return Err(WindowClosedError.into());
         }

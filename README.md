@@ -196,6 +196,9 @@ cargo run --bin led-client -- --file image.png --duration 10
 # Horizontal scroll PPM
 cargo run --bin led-client -- --file banner.ppm --duration 20
 
+# Scroll at least twice and for at least five seconds
+cargo run --bin led-client -- --file banner.ppm --scroll-cycles 2 --min-display-seconds 5
+
 # Explicitly specify display mode
 cargo run --bin led-client -- --file image.png --duration 10 --display-mode scroll
 
@@ -209,9 +212,11 @@ cargo run --bin led-client -- --addr http://raspberrypi.local:50051 --file image
 |--------|---------|-------------|
 | `--addr` | `http://localhost:50051` | Server address |
 | `--file` | required | Path to image file to send |
-| `--duration` | `10` | Main image display duration in seconds, excluding eye-catch and preparation |
+| `--duration` | `10` | Main display duration, or an older-server fallback when cycles are specified |
 | `--mime` | auto-detected from extension | MIME type |
 | `--display-mode` | inferred from file type | `static` or `scroll` |
+| `--scroll-cycles` | unset | Minimum horizontal scroll cycles |
+| `--min-display-seconds` | `0` | Minimum main display time; requires `--scroll-cycles` |
 
 ### Display Mode Inference
 
@@ -245,6 +250,13 @@ decoded and prepared, so it represents actual main display time unless the
 remaining worker timeout is shorter. Shutdown discards queued requests. See [`src/shutdown.rs`](src/shutdown.rs),
 [`src/worker.rs`](src/worker.rs) and [`src/decode.rs`](src/decode.rs) for
 cancellation and resource-limit details.
+
+When `scroll_cycles` is positive, the server ignores `duration_seconds` and
+scrolls until both the requested cycle count and `min_display_seconds` are
+satisfied. The duration can remain positive as a fallback for older servers,
+which ignore the new fields and cannot guarantee either condition. Eye-catch
+playback is excluded from both conditions, while `WORKER_TIMEOUT` and shutdown
+can still interrupt the request before completion.
 
 ## Cargo Features
 

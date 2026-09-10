@@ -28,6 +28,14 @@ struct Args {
     /// Display mode (default: inferred from file type — PPM scrolls, others are static)
     #[arg(long, value_enum)]
     display_mode: Option<DisplayModeArg>,
+
+    /// Minimum horizontal scroll cycles (uses --duration as an older-server fallback)
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    scroll_cycles: Option<u32>,
+
+    /// Minimum main display time for cycle-based scrolling
+    #[arg(long, default_value_t = 0)]
+    min_display_seconds: u32,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -36,6 +44,19 @@ enum DisplayModeArg {
     Static,
     /// Scroll image horizontally.
     Scroll,
+}
+
+fn validate_scroll_options(args: &Args, mime_type: &str) -> Result<()> {
+    if args.min_display_seconds > 0 && args.scroll_cycles.is_none() {
+        anyhow::bail!("--min-display-seconds requires --scroll-cycles");
+    }
+    if args.scroll_cycles.is_some() && mime_type.eq_ignore_ascii_case("image/gif") {
+        anyhow::bail!("--scroll-cycles cannot be used with GIF images");
+    }
+    if args.scroll_cycles.is_some() && matches!(args.display_mode, Some(DisplayModeArg::Static)) {
+        anyhow::bail!("--scroll-cycles cannot be used with --display-mode static");
+    }
+    Ok(())
 }
 
 fn detect_mime(path: &str) -> Option<&'static str> {
@@ -60,24 +81,31 @@ async fn main() -> Result<()> {
     let image_data =
         std::fs::read(&args.file).with_context(|| format!("failed to read file: {}", args.file))?;
 
-    let mime_type = args.mime.unwrap_or_else(|| match detect_mime(&args.file) {
-        Some(m) => m.to_string(),
-        None => {
-            eprintln!(
-                "warning: unknown file extension for '{}', assuming image/png",
-                args.file
-            );
-            "image/png".to_string()
-        }
-    });
+    let mime_type = args
+        .mime
+        .clone()
+        .unwrap_or_else(|| match detect_mime(&args.file) {
+            Some(m) => m.to_string(),
+            None => {
+                eprintln!(
+                    "warning: unknown file extension for '{}', assuming image/png",
+                    args.file
+                );
+                "image/png".to_string()
+            }
+        });
+
+    validate_scroll_options(&args, &mime_type)?;
 
     let display_mode = match args.display_mode {
         Some(DisplayModeArg::Static) => DisplayMode::Static as i32,
         Some(DisplayModeArg::Scroll) => DisplayMode::Scroll as i32,
+        None if args.scroll_cycles.is_some() => DisplayMode::Scroll as i32,
         None => DisplayMode::Unspecified as i32,
     };
 
-    // Allow a bit more than the display duration for the request to complete.
+    // This bounds RPC admission, not display completion. Keep the duration-based
+    // compatibility margin when cycle options are sent to an older server.
     let request_timeout = Duration::from_secs(args.duration as u64 + 10);
     let endpoint = tonic::transport::Endpoint::from_shared(args.addr.clone())
         .with_context(|| format!("invalid address: {}", args.addr))?
@@ -95,6 +123,8 @@ async fn main() -> Result<()> {
         }),
         duration_seconds: args.duration,
         display_mode,
+        scroll_cycles: args.scroll_cycles.unwrap_or(0),
+        min_display_seconds: args.min_display_seconds,
     };
 
     let response = client.send_image(request).await?.into_inner();
@@ -107,4 +137,46 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(extra: &[&str]) -> Args {
+        let mut values = vec!["led-client", "--file", "image.png"];
+        values.extend_from_slice(extra);
+        Args::try_parse_from(values).unwrap()
+    }
+
+    #[test]
+    fn validates_scroll_option_combinations() {
+        assert!(validate_scroll_options(&args(&[]), "image/png").is_ok());
+        assert!(validate_scroll_options(
+            &args(&["--scroll-cycles", "2", "--min-display-seconds", "5"]),
+            "image/png"
+        )
+        .is_ok());
+        assert!(
+            validate_scroll_options(&args(&["--min-display-seconds", "5"]), "image/png").is_err()
+        );
+        assert!(validate_scroll_options(&args(&["--scroll-cycles", "2"]), "image/gif").is_err());
+        assert!(validate_scroll_options(
+            &args(&["--scroll-cycles", "2", "--display-mode", "static"]),
+            "image/png"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn rejects_zero_scroll_cycles() {
+        assert!(Args::try_parse_from([
+            "led-client",
+            "--file",
+            "image.png",
+            "--scroll-cycles",
+            "0"
+        ])
+        .is_err());
+    }
 }
