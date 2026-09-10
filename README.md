@@ -258,6 +258,20 @@ which ignore the new fields and cannot guarantee either condition. Eye-catch
 playback is excluded from both conditions, while `WORKER_TIMEOUT` and shutdown
 can still interrupt the request before completion.
 
+A cycle covers every horizontal offset of the image after it has been scaled to
+the panel height. An offset counts only after it has been rendered successfully
+and held for `SCROLL_INTERVAL_MS`; repeated refreshes of the same offset do not
+advance the cycle. Once the requested cycles are complete, playback stops as
+soon as the minimum display time is reached, even in the middle of an additional
+cycle. See [ADR-0001](docs/adr/0001-cycle-based-scroll-termination.md) for the
+design rationale and compatibility tradeoffs.
+
+Normal main-display completion is logged with `reason=duration_completed` or
+`reason=cycles_completed`. Interrupted or failed work uses `worker_timeout`,
+`shutdown`, or `error`. Cycle completion logs include the requested and completed
+cycles, prepared image width, minimum display time, scroll interval, and elapsed
+time; per-frame logging is intentionally omitted.
+
 ## Cargo Features
 
 | Feature | Description |
