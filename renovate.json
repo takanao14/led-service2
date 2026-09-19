@@ -10,7 +10,7 @@
   ],
   "semanticCommitType": "build",
   "timezone": "Asia/Tokyo",
-  "minimumReleaseAge": "1 day",
+  "minimumReleaseAge": "2 days",
   "labels": ["dependencies", "renovate", "manual-review"],
   "osvVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
