@@ -4,6 +4,7 @@
     "config:recommended",
     "helpers:pinGitHubActionDigests",
     ":semanticCommits",
+    ":semanticCommitTypeAll(build)",
     ":separateMajorReleases",
     ":combinePatchMinorReleases",
     ":rebaseStalePrs"
@@ -14,7 +15,7 @@
   "labels": ["dependencies", "renovate", "manual-review"],
   "osvVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
-    "labels": ["dependencies", "renovate", "manual-review", "security"],
+    "addLabels": ["security"],
     "assignees": ["takanao14"],
     "minimumReleaseAge": null
   },
@@ -36,23 +37,21 @@
       "groupName": "tonic and prost"
     },
     {
-      "description": "Hardware and platform backends cannot be validated by CI, which only builds the Raspberry Pi target; these updates are reviewed and tested on the device.",
+      "description": "CI compiles and tests both backends but cannot exercise real display or audio output; these updates are verified on the device (hardware) or in the emulator.",
       "matchManagers": ["cargo"],
       "matchPackageNames": ["rpi-led-matrix", "minifb", "alsa", "rodio", "hound"],
-      "automerge": false,
-      "labels": ["dependencies", "renovate", "manual-review", "hardware-backend"]
+      "addLabels": ["hardware-backend"]
     },
     {
-      "description": "alsa 0.12 requires alsa-sys 0.6, while rodio -> cpal still pulls in an older alsa-sys. Both declare links = \"alsa\", and cargo resolves the union of the target-specific dependencies, so only one may exist. Lift this once cpal and rodio ship alsa-sys 0.6.",
+      "description": "alsa 0.12 requires alsa-sys 0.6, while rodio -> cpal still depends on alsa 0.11 (alsa-sys 0.4). Both alsa-sys versions declare links = \"alsa\", and cargo resolves the union of the target-specific dependencies, so only one may exist. Lift this once cpal moves to alsa 0.12.",
       "matchManagers": ["cargo"],
       "matchPackageNames": ["alsa"],
       "allowedVersions": "<0.12"
     },
     {
-      "description": "Never auto-merge major updates.",
+      "description": "Flag major updates for closer review.",
       "matchUpdateTypes": ["major"],
-      "automerge": false,
-      "labels": ["dependencies", "renovate", "manual-review", "major-update"]
+      "addLabels": ["major-update"]
     },
     {
       "description": "The led-image-api submodule reference is bumped deliberately together with regenerated bindings.",
