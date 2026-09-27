@@ -43,6 +43,27 @@ jobs:
           pipx run --spec ansible-core ansible-playbook -i localhost, ansible/tests/state.yaml
           pipx run --spec ansible-core ansible-playbook -i localhost, ansible/tests/install.yaml -e ansible_become=true
 
+  crate-release-age:
+    name: Check crate release age
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'security')
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch base lockfile
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git show "$BASE_SHA:Cargo.lock" > "$RUNNER_TEMP/base-Cargo.lock"
+
+      - name: Test release age check
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Check introduced crate releases
+        run: python3 scripts/check_crate_release_age.py --base "$RUNNER_TEMP/base-Cargo.lock"
+
   emulator:
     name: Lint and test (emulator)
     # The emulator backend targets macOS development, where minifb owns the
