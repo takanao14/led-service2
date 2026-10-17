@@ -15,11 +15,39 @@ Commands below run from the repository root. They use the default inventory at
 `ansible/inventories/homelab/hosts.yaml`; override it with `ANSIBLE_INVENTORY`.
 See [ansible/README.md](ansible/README.md) for direct playbook commands.
 
+## Pull requests and hardware validation
+
+All changes to `main`, including owner and Bot changes, go through a pull request.
+The main ruleset requires zero approving reviews and successful `Format`,
+`Lint and test (emulator)`, `Lint and build (rpi)`, `package / build`, and
+`CI gate` checks from GitHub Actions. Deletion and force pushes are blocked,
+with no bypass actors. Branches must be up to date before merging.
+
+`CI gate` requires every dependency to succeed. Only the crate release age job
+may be skipped: on a PR labeled `security`, or on non-PR runs (including tag
+releases). Failures and cancellations still block the gate. Adding or removing
+the label reruns CI. Use `security` only for intentional security updates.
+Reusable Release checks have the `checks /` prefix; they are not the PR check
+names configured in the ruleset.
+
+For changes affecting the hardware backend, display timing, audio, runtime
+configuration, or deployment, record the manual device validation in the PR:
+LED output (static, scrolling, animation and eye-catch as affected), jingle/audio,
+and shutdown behavior. Record the tested commit, device/OS, configuration, and
+result, or explicitly state what remains untested. CI uses a hosted ARM runner
+and cannot verify panel wiring, USB interference, physical display, or audio.
+Arrange device validation explicitly; source and documentation checks do not
+authorize deploying or restarting the device. The maintainer decides whether
+any outstanding hardware validation blocks merging or release.
+
 ## Publishing
 
-1. Update the version in `Cargo.toml` and `Cargo.lock`.
-2. Merge the change after CI passes.
-3. Create and push a matching annotated tag, such as `v0.2.0`.
+1. Update the version in `Cargo.toml` and `Cargo.lock` in a PR.
+2. Merge the PR after all required checks pass and review any manual hardware
+   validation results. A merge does not publish or deploy a release.
+3. Manually decide whether to release. Fetch `main`, select the merged commit,
+   and confirm its version, CI results, and required device validation.
+4. Create and push a matching annotated tag on that commit, such as `v0.2.0`.
 
 A tag push validates the version, runs CI, builds and verifies the archives,
 and creates a GitHub Release. A suffix such as `v0.2.0-rc.1` creates a

@@ -22,6 +22,8 @@
 - Documentation-only changes require path, command, and consistency checks; Rust builds are not required.
 
 ## Deployment and Operations
+- Update `main` through a PR, including owner and Bot changes; do not bypass required checks. See `RELEASE.md` for required check names and the release-age skip policy.
+- Record manual LED/audio validation for hardware-related changes in the PR, or explicitly record untested scope. Merging and publishing are separate decisions; tags and device operations require explicit authorization.
 - The `led_service2_monitor` Ansible role publishes periodic availability checks to the Homelab-managed node_exporter textfile directory. Do not change shared directory ownership; monitoring never sends display requests.
 - `make deploy` runs `deploy.sh`, which uses rsync with `--delete` and builds remotely. Check the destination and deletion scope, and exclude local secrets from syncs.
 - `sudo make install` copies assets, writes a systemd unit and an audio udev rule, and enables/starts the service. Build the binary and prepare required assets first.
