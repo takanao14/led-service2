@@ -3,6 +3,7 @@ name: CI
 on:
   workflow_call:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches:
       - main
@@ -125,3 +126,19 @@ jobs:
 
   package:
     uses: ./.github/workflows/build-rpi.yml
+
+  ci-gate:
+    name: CI gate
+    if: ${{ always() }}
+    needs: [format, crate-release-age, emulator, rpi, package]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test CI gate policy
+        run: python3 -m unittest discover -s scripts -p 'test_ci_gate.py'
+      - name: Require successful dependencies
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_SECURITY: ${{ contains(github.event.pull_request.labels.*.name, 'security') }}
+        run: python3 scripts/check_ci_gate.py
