@@ -21,6 +21,7 @@
   },
   "lockFileMaintenance": {
     "enabled": true,
+    "updateNotScheduled": false,
     "schedule": ["before 6am on monday"]
   },
   "packageRules": [
