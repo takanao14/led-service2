@@ -21,7 +21,7 @@ env:
 jobs:
   format:
     name: Format
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
 
     steps:
       - uses: actions/checkout@v7
@@ -47,7 +47,7 @@ jobs:
   crate-release-age:
     name: Check crate release age
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'security')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
 
     steps:
       - uses: actions/checkout@v7
@@ -95,7 +95,7 @@ jobs:
 
   rpi:
     name: Lint and build (rpi)
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
 
     steps:
       - uses: actions/checkout@v7
@@ -131,7 +131,7 @@ jobs:
     name: CI gate
     if: ${{ always() }}
     needs: [format, crate-release-age, emulator, rpi, package]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - name: Test CI gate policy
