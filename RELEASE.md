@@ -30,6 +30,38 @@ the label reruns CI. Use `security` only for intentional security updates.
 Reusable Release checks have the `checks /` prefix; they are not the PR check
 names configured in the ruleset.
 
+### Completing dependency cooldowns
+
+Lock file maintenance runs before 06:00 on Mondays in Asia/Tokyo. Its
+`updateNotScheduled: false` setting prevents Renovate from updating existing
+maintenance branches outside that window. Cargo can still select newly
+published transitive dependencies during lockfile generation; the CI release-age
+check remains the authority for the two-day cooldown.
+
+If repeated lockfile regeneration extends a PR's cooldown, freeze that PR:
+
+1. Add the `stop-updating` label to stop Renovate updates. Verify the PR head
+   and the latest `Check crate release age` log after applying the label.
+2. Keep the selected dependency versions while bringing the branch up to date
+   with `main`, using a normal Git merge or rebase rather than Renovate's
+   rebase/retry checkbox. Do not regenerate `Cargo.lock` or run `cargo update`.
+   Resolve lockfile conflicts deliberately, retaining necessary changes from
+   `main`, and inspect the resulting dependency diff. If new versions are
+   introduced, determine their cooldown deadlines again.
+3. After the latest `eligible after` timestamp in the release-age log, rerun
+   failed jobs on the latest PR workflow run, for example:
+   `gh run rerun <run-id> --failed`. Wait for all required checks, including
+   `CI gate`, to pass before merging.
+
+Keep `stop-updating` applied until the PR is merged or intentionally returned
+to Renovate. The weekly window limits churn but does not freeze a PR across
+subsequent Mondays; use the label when a fixed set of versions is needed.
+Do not use the `security` label merely to bypass the cooldown. These steps
+only prepare a PR for merging; release publication and device deployment
+remain separate decisions.
+
+### Hardware validation
+
 For changes affecting the hardware backend, display timing, audio, runtime
 configuration, or deployment, record the manual device validation in the PR:
 LED output (static, scrolling, animation and eye-catch as affected), jingle/audio,
