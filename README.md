@@ -35,6 +35,11 @@ led-server
 | Raspberry Pi (release deployment) | Debian 13 (trixie), ARM64, Python 3 for Ansible, sudo access, runtime libraries including `libasound2t64` |
 | Raspberry Pi (source build only) | Rust toolchain, `build-essential`, `pkg-config`, `libasound2-dev`, `protobuf-compiler` |
 
+Use Cargo 1.100 or newer when updating dependencies so that the two-day
+cooldown in `.cargo/config.toml` is enforced. Older Cargo versions do not enforce
+this setting. See [RELEASE.md](RELEASE.md#completing-dependency-cooldowns) for
+dependency update and emergency security update procedures.
+
 ## Deploying to Raspberry Pi
 
 Run deployment commands **on the macOS controller, from the repository root**.
