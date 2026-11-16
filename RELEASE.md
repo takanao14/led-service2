@@ -35,8 +35,42 @@ names configured in the ruleset.
 Lock file maintenance runs before 06:00 on Mondays in Asia/Tokyo. Its
 `updateNotScheduled: false` setting prevents Renovate from updating existing
 maintenance branches outside that window. Cargo can still select newly
-published transitive dependencies during lockfile generation; the CI release-age
-check remains the authority for the two-day cooldown.
+published transitive dependencies during lockfile generation unless its
+resolver also enforces a cooldown.
+
+`.cargo/config.toml` sets `registry.global-min-publish-age = "2 days"` for
+dependency resolution with Cargo 1.100 or newer. Renovate's `constraints.rust`
+selects Rust 1.100.0 for lockfile updates; CI continues to use stable Rust.
+If Renovate runs with `binarySource=global`, the operator must provide Cargo
+1.100 or newer because tool constraints do not install a toolchain in that mode.
+Use Cargo 1.100 or newer for manual updates too, for example:
+
+```sh
+cargo +1.100.0 update
+```
+
+Install that toolchain first with `rustup toolchain install 1.100.0` if needed.
+Keep the Cargo cooldown and Renovate's `minimumReleaseAge` aligned at two days.
+Cargo's default `resolver.incompatible-publish-age = "deny"` excludes newly
+published versions during resolution, but accepts versions already present in
+`Cargo.lock`. The CI release-age check therefore remains the authority for the
+two-day cooldown, including manually supplied lockfile changes. Adding this
+setting to a `--locked` build does not validate the age of locked dependencies.
+
+For an intentional emergency security update that cannot wait two days, resolve
+only the required update with a command-scoped override:
+
+```sh
+CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow \
+  cargo +1.100.0 update -p <crate> --precise <version>
+```
+
+Review the complete `Cargo.lock` diff, including transitive changes, and apply
+the `security` PR label only for this intentional security exception. The label
+skips the CI age check; it does not change Cargo's resolver configuration. If
+Renovate cannot generate an urgent update under the repository cooldown, prepare
+the lockfile manually using this procedure. Do not commit the override to Cargo
+configuration or disable the normal two-day policy.
 
 If repeated lockfile regeneration extends a PR's cooldown, freeze that PR:
 
