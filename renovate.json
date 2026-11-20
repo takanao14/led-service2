@@ -24,6 +24,7 @@
   },
   "lockFileMaintenance": {
     "enabled": true,
+    "minimumReleaseAgeBehaviour": "timestamp-optional",
     "updateNotScheduled": false,
     "schedule": ["before 6am on monday"]
   },
@@ -33,6 +34,11 @@
       "matchManagers": ["github-actions"],
       "matchPackageNames": ["actions/**", "github/**"],
       "pinDigests": false
+    },
+    {
+      "description": "Lockfile maintenance and GitHub Action digest updates do not provide release timestamps to Renovate; Cargo and CI enforce the two-day crate cooldown for Cargo.lock.",
+      "matchUpdateTypes": ["lockFileMaintenance", "digest", "pinDigest"],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
     },
     {
       "description": "tonic, tonic-prost, tonic-prost-build and prost generate and consume the same bindings, so they must move together.",

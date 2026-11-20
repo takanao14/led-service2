@@ -51,6 +51,10 @@ cargo +1.100.0 update
 
 Install that toolchain first with `rustup toolchain install 1.100.0` if needed.
 Keep the Cargo cooldown and Renovate's `minimumReleaseAge` aligned at two days.
+Renovate sets `minimumReleaseAgeBehaviour` to `timestamp-optional` for
+`lockFileMaintenance`, `digest`, and `pinDigest` updates because those virtual
+or commit-digest updates do not provide registry release timestamps to
+Renovate's `renovate/stability-days` check.
 Cargo's default `resolver.incompatible-publish-age = "deny"` excludes newly
 published versions during resolution, but accepts versions already present in
 `Cargo.lock`. The CI release-age check therefore remains the authority for the
