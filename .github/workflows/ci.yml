@@ -129,7 +129,7 @@ jobs:
 
   ci-gate:
     name: CI gate
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     needs: [format, crate-release-age, emulator, rpi, package]
     runs-on: ubuntu-26.04
     steps:

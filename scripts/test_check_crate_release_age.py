@@ -3,10 +3,10 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from check_crate_release_age import check
+from check_crate_release_age import check, minimum_age
 
 
 class ReleaseAgeTests(unittest.TestCase):
@@ -75,6 +75,10 @@ class ReleaseAgeTests(unittest.TestCase):
             raise OSError("registry unavailable")
 
         self.assertFalse(self.run_check(base, current, self.config, lookup=lookup))
+
+    def test_repository_renovate_config_is_valid(self):
+        repo_config = Path(__file__).resolve().parent.parent / "renovate.json"
+        self.assertEqual(minimum_age(repo_config), timedelta(days=2))
 
 
 if __name__ == "__main__":
